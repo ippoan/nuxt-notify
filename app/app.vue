@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAuth } from '@ippoan/auth-client'
 
-const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin, logout, activateDevice } = useAuth()
+const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin, logout } = useAuth()
 const runtimeConfig = useRuntimeConfig()
 const { apiFetch } = useApi()
 
