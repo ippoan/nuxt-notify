@@ -16,6 +16,8 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const success = ref('')
+const generating = ref(false)
+const publicKeyPem = ref('')
 
 const form = reactive({
   name: '',
@@ -41,6 +43,70 @@ async function load() {
   }
 }
 
+/** Web Crypto API で RSA 鍵ペアを生成 */
+async function generateKeyPair() {
+  generating.value = true
+  error.value = ''
+  publicKeyPem.value = ''
+  try {
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-256',
+      },
+      true, // extractable
+      ['sign', 'verify'],
+    )
+
+    // 公開鍵 → PEM (LINE Console に貼る)
+    const pubDer = await crypto.subtle.exportKey('spki', keyPair.publicKey)
+    publicKeyPem.value = derToPem(pubDer, 'PUBLIC KEY')
+
+    // 秘密鍵 → PEM (フォームに自動入力)
+    const privDer = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
+    form.private_key = derToPem(privDer, 'PRIVATE KEY')
+
+    success.value = '鍵ペアを生成しました。公開鍵を LINE Developers Console に登録してください。'
+  } catch (e: any) {
+    error.value = '鍵生成失敗: ' + (e.message || String(e))
+  } finally {
+    generating.value = false
+  }
+}
+
+function derToPem(der: ArrayBuffer, label: string): string {
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(der)))
+  const lines = b64.match(/.{1,64}/g) || []
+  return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----`
+}
+
+async function copyPublicKey() {
+  await navigator.clipboard.writeText(publicKeyPem.value)
+  success.value = '公開鍵をクリップボードにコピーしました'
+}
+
+function downloadPublicKey() {
+  const blob = new Blob([publicKeyPem.value], { type: 'application/x-pem-file' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'line-public-key.pem'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function downloadPrivateKey() {
+  const blob = new Blob([form.private_key], { type: 'application/x-pem-file' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'line-private-key.pem'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 async function save() {
   saving.value = true
   error.value = ''
@@ -56,9 +122,9 @@ async function save() {
         private_key: form.private_key,
       }),
     })
-    // secret fields はクリア (保存済み)
     form.channel_secret = ''
     form.private_key = ''
+    publicKeyPem.value = ''
     success.value = '保存しました'
   } catch (e: any) {
     error.value = '保存失敗: ' + (e.message || String(e))
@@ -77,6 +143,7 @@ async function remove() {
     form.channel_secret = ''
     form.key_id = ''
     form.private_key = ''
+    publicKeyPem.value = ''
     success.value = '削除しました'
   } catch (e: any) {
     error.value = '削除失敗: ' + (e.message || String(e))
@@ -109,9 +176,54 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- フォーム -->
+      <!-- Step 1: 鍵ペア生成 -->
       <div class="bg-white rounded-lg shadow border p-4">
-        <h3 class="font-medium mb-3">{{ config ? '設定を更新' : '新規設定' }}</h3>
+        <h3 class="font-medium mb-3">Step 1: 鍵ペア生成</h3>
+        <p class="text-sm text-gray-500 mb-3">
+          RSA 鍵ペアを生成し、公開鍵を LINE Developers Console に登録します。
+        </p>
+        <button @click="generateKeyPair" :disabled="generating"
+                class="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50">
+          {{ generating ? '生成中...' : '鍵ペアを生成' }}
+        </button>
+
+        <!-- 公開鍵表示 -->
+        <div v-if="publicKeyPem" class="mt-3">
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            公開鍵 (LINE Developers Console にコピー)
+          </label>
+          <textarea :value="publicKeyPem" readonly rows="8"
+                    class="w-full border rounded px-3 py-2 text-xs font-mono bg-yellow-50 select-all" />
+          <div class="mt-2 flex gap-2 flex-wrap">
+            <button @click="copyPublicKey"
+                    class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
+              コピー
+            </button>
+            <button @click="downloadPublicKey"
+                    class="bg-gray-500 text-white px-3 py-1 rounded text-xs hover:bg-gray-600">
+              ダウンロード (公開鍵)
+            </button>
+            <button @click="downloadPrivateKey"
+                    class="bg-orange-500 text-white px-3 py-1 rounded text-xs hover:bg-orange-600">
+              ダウンロード (秘密鍵)
+            </button>
+            <a href="https://developers.line.biz/console/" target="_blank"
+               class="text-blue-600 text-xs underline leading-6">
+              LINE Developers Console を開く
+            </a>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">
+            1. LINE Developers Console → チャネル → Messaging API設定<br>
+            2. 「アサーション署名キー」→「公開鍵を登録する」をクリック<br>
+            3. 上の公開鍵を貼り付けて「登録」<br>
+            4. 表示される kid をコピーして下の「kid」欄に入力
+          </p>
+        </div>
+      </div>
+
+      <!-- Step 2: 設定入力 -->
+      <div class="bg-white rounded-lg shadow border p-4">
+        <h3 class="font-medium mb-3">Step 2: 設定を入力</h3>
 
         <div class="space-y-3">
           <div>
@@ -132,27 +244,28 @@ onMounted(load)
             <input v-model="form.channel_secret" type="password"
                    class="w-full border rounded px-3 py-2 text-sm font-mono"
                    :placeholder="config ? '(変更する場合のみ入力)' : '32文字の英数字'">
-            <p class="text-xs text-gray-400 mt-1">LINE Developers Console → チャネル基本設定 → チャネルシークレット</p>
+            <p class="text-xs text-gray-400 mt-1">チャネル基本設定 → チャネルシークレット</p>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Assertion Signing Key ID (kid)</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">kid (公開鍵登録後に表示される)</label>
             <input v-model="form.key_id" class="w-full border rounded px-3 py-2 text-sm font-mono"
-                   placeholder="例: 12345678-abcd-1234-abcd-123456789012">
-            <p class="text-xs text-gray-400 mt-1">LINE Developers Console → Messaging API設定 → アサーション署名キー</p>
+                   placeholder="公開鍵を登録すると表示されます">
           </div>
 
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">秘密鍵 (PEM)</label>
-            <textarea v-model="form.private_key" rows="6"
-                      class="w-full border rounded px-3 py-2 text-sm font-mono"
-                      :placeholder="config ? '(変更する場合のみ入力)' : '-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----'"></textarea>
-            <p class="text-xs text-gray-400 mt-1">キーペア生成時にダウンロードした秘密鍵ファイルの内容</p>
+            <textarea v-model="form.private_key" rows="4"
+                      class="w-full border rounded px-3 py-2 text-xs font-mono bg-gray-50"
+                      :placeholder="publicKeyPem ? '(Step 1 で自動入力済み)' : '-----BEGIN PRIVATE KEY-----'"
+                      :class="{ 'bg-green-50': form.private_key && publicKeyPem }" />
+            <p v-if="form.private_key && publicKeyPem" class="text-xs text-green-600 mt-1">✓ Step 1 で生成済み</p>
           </div>
         </div>
 
-        <div class="mt-4 flex gap-3">
-          <button @click="save" :disabled="saving || !form.name || !form.channel_id || !form.key_id"
+        <div class="mt-4">
+          <button @click="save"
+                  :disabled="saving || !form.name || !form.channel_id || !form.key_id || !form.private_key || !form.channel_secret"
                   class="bg-blue-600 text-white px-6 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
             {{ saving ? '保存中...' : '保存' }}
           </button>
@@ -161,8 +274,8 @@ onMounted(load)
 
       <!-- Webhook URL -->
       <div class="bg-gray-50 border rounded-lg p-4">
-        <h3 class="font-medium mb-2">Webhook URL</h3>
-        <p class="text-sm text-gray-500 mb-2">LINE Developers Console の Webhook URL に以下を設定してください:</p>
+        <h3 class="font-medium mb-2">Step 3: Webhook URL</h3>
+        <p class="text-sm text-gray-500 mb-2">LINE Developers Console の Webhook URL に以下を設定:</p>
         <code class="block bg-white border rounded px-3 py-2 text-sm font-mono text-blue-700 select-all">
           {{ apiBase }}/api/notify/line/webhook
         </code>
