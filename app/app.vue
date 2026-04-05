@@ -5,10 +5,6 @@ const stagingTenantId = computed(() => config.public.stagingTenantId as string)
 
 onMounted(() => {
   init()
-  // 未認証かつ staging でなければログインへリダイレクト
-  if (!isAuthenticated.value && !stagingTenantId.value) {
-    redirectToLogin()
-  }
 })
 </script>
 
