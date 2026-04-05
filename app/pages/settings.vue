@@ -38,7 +38,7 @@ const form = reactive({
   key_id: '',
   private_key: '',
   login_channel_id: '',
-  login_channel_secret: '',
+  login_key_id: '',
 })
 
 async function load() {
@@ -144,12 +144,12 @@ async function save() {
         private_key: form.private_key,
         bot_basic_id: botBasicId.value || null,
         login_channel_id: form.login_channel_id || null,
-        login_channel_secret: form.login_channel_secret || null,
+        login_key_id: form.login_key_id || null,
       }),
     })
     form.channel_secret = ''
     form.private_key = ''
-    form.login_channel_secret = ''
+    form.login_key_id = ''
     publicKeyPem.value = ''
     success.value = '保存しました'
   } catch (e: any) {
@@ -170,7 +170,7 @@ async function remove() {
     form.key_id = ''
     form.private_key = ''
     form.login_channel_id = ''
-    form.login_channel_secret = ''
+    form.login_key_id = ''
     publicKeyPem.value = ''
     success.value = '削除しました'
   } catch (e: any) {
@@ -312,10 +312,11 @@ onMounted(load)
                      placeholder="LINE Login チャネルの Channel ID">
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login Channel Secret</label>
-              <input v-model="form.login_channel_secret" type="password"
+              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login kid</label>
+              <input v-model="form.login_key_id"
                      class="w-full border rounded px-3 py-2 text-sm font-mono"
-                     :placeholder="config ? '(変更する場合のみ入力)' : 'Channel Secret'">
+                     placeholder="LINE Login チャネルに同じ公開鍵を登録して kid を入力">
+              <p class="text-xs text-gray-400 mt-1">Messaging API と同じ公開鍵を LINE Login チャネルにも登録してください</p>
             </div>
           </div>
         </div>
