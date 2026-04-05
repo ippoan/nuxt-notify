@@ -59,8 +59,3 @@ services:
       R2_PATH_STYLE: "1"
       STAGING_MODE: "false"
       RUST_LOG: info
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/health || exit 1"]
-      interval: 3s
-      timeout: 3s
-      retries: 15
