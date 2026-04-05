@@ -1,0 +1,31 @@
+#!/bin/bash
+# pre-push hook: PR が merged/closed なブランチへの push を拒否
+# git 自体が実行するので Claude hooks に依存しない
+
+BRANCH=$(git branch --show-current 2>/dev/null)
+
+# main/master は対象外
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  exit 0
+fi
+
+# gh コマンドがなければスキップ
+if ! command -v gh &>/dev/null; then
+  exit 0
+fi
+
+PR_STATE=$(gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null)
+
+if [ "$PR_STATE" = "MERGED" ]; then
+  echo "❌ ERROR: PR for branch '$BRANCH' is already MERGED."
+  echo "   push しても CI は走りません。新しいブランチを作成してください。"
+  exit 1
+fi
+
+if [ "$PR_STATE" = "CLOSED" ]; then
+  echo "❌ ERROR: PR for branch '$BRANCH' is CLOSED."
+  echo "   push しても CI は走りません。"
+  exit 1
+fi
+
+exit 0

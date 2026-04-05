@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { useAuth } from '@ippoan/auth-client'
+
 const { apiFetch } = useApi()
+const { orgId } = useAuth()
 
 interface LineConfigResponse {
   id: string
@@ -30,6 +33,17 @@ const friendAddUrl = computed(() => {
 const qrCodeUrl = computed(() => {
   if (!friendAddUrl.value) return ''
   return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(friendAddUrl.value)}`
+})
+
+const inviteLoginUrl = computed(() => {
+  if (!orgId.value) return ''
+  const redirectUri = encodeURIComponent(window.location.origin + '/?lw_callback=1')
+  return `${apiBase}/api/auth/line/redirect?tenant_id=${orgId.value}&redirect_uri=${redirectUri}`
+})
+
+const inviteQrCodeUrl = computed(() => {
+  if (!inviteLoginUrl.value) return ''
+  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(inviteLoginUrl.value)}`
 })
 
 const form = reactive({
@@ -101,6 +115,11 @@ function derToPem(der: ArrayBuffer, label: string): string {
   const b64 = btoa(String.fromCharCode(...new Uint8Array(der)))
   const lines = b64.match(/.{1,64}/g) || []
   return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----`
+}
+
+async function copyInviteUrl() {
+  await navigator.clipboard.writeText(inviteLoginUrl.value)
+  success.value = '招待リンクをコピーしました'
 }
 
 async function copySavedPublicKey() {
@@ -345,6 +364,24 @@ onMounted(load)
           <p class="text-sm font-medium mb-1">{{ config?.bot_basic_id }}</p>
           <a :href="friendAddUrl" target="_blank"
              class="text-blue-600 text-sm underline">LINE で開く</a>
+        </div>
+      </div>
+
+      <!-- Step 5: 招待 QR (LINE Login) -->
+      <div v-if="config" class="bg-white rounded-lg shadow border p-4">
+        <h3 class="font-medium mb-3">Step 5: ユーザー招待 QR (LINE Login)</h3>
+        <p class="text-sm text-gray-500 mb-3">
+          この QR を読み取ると LINE Login でこのテナントに自動登録されます。
+        </p>
+        <div class="text-center bg-gray-50 rounded p-6">
+          <img v-if="inviteQrCodeUrl" :src="inviteQrCodeUrl" alt="LINE Login 招待 QR" class="mx-auto w-48 h-48 mb-3" />
+          <p class="text-xs text-gray-500 mb-2">LINE Login 招待リンク:</p>
+          <input :value="inviteLoginUrl" readonly
+                 class="w-full border rounded px-3 py-2 text-xs font-mono bg-white select-all mb-2" />
+          <button @click="copyInviteUrl"
+                  class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
+            コピー
+          </button>
         </div>
       </div>
 
