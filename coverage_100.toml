@@ -4,3 +4,11 @@
 [[files]]
 path = "app/composables/useApi.ts"
 branches = true
+
+[[files]]
+path = "app/composables/useAuth.ts"
+branches = true
+
+[[files]]
+path = "app/utils/env.ts"
+branches = true
