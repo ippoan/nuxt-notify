@@ -1,14 +1,10 @@
 <script setup lang="ts">
 const config = useRuntimeConfig()
-const { isAuthenticated, tenantId, init, redirectToLogin, logout } = useAuth()
+const { isAuthenticated, init, redirectToLogin, logout } = useAuth()
 const stagingTenantId = computed(() => config.public.stagingTenantId as string)
 
 onMounted(() => {
   init()
-  // 未認証かつ staging でなければログインへリダイレクト
-  if (!isAuthenticated.value && !stagingTenantId.value) {
-    redirectToLogin()
-  }
 })
 </script>
 
