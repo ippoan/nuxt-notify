@@ -107,6 +107,13 @@ function derToPem(der: ArrayBuffer, label: string): string {
   return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----`
 }
 
+async function copySavedPublicKey() {
+  if (config.value?.public_key_jwk) {
+    await navigator.clipboard.writeText(config.value.public_key_jwk)
+    success.value = 'コピーしました'
+  }
+}
+
 async function copyPublicKey() {
   await navigator.clipboard.writeText(publicKeyPem.value)
   success.value = '公開鍵をクリップボードにコピーしました'
@@ -232,7 +239,7 @@ onMounted(load)
           <textarea :value="config.public_key_jwk" readonly rows="7"
                     class="w-full border rounded px-3 py-2 text-xs font-mono bg-gray-50 select-all" />
           <div class="mt-2 flex gap-2">
-            <button @click="navigator.clipboard.writeText(config!.public_key_jwk!); success = 'コピーしました'"
+            <button @click="copySavedPublicKey"
                     class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
               コピー
             </button>
