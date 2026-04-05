@@ -18,4 +18,5 @@ jobs:
     with:
       project_type: 'nuxt'
       npm_scope: '@ippoan'
+      use_auth_client_dev: true
     secrets: inherit
