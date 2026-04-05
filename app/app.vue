@@ -11,6 +11,9 @@ const lineLoginUrl = computed(() => {
   return `${apiBase}/api/auth/line/redirect?redirect_uri=${redirectUri}`
 })
 
+// エラーメッセージ (LINE Login 失敗時)
+const loginError = ref('')
+
 // テナント選択 (LINE Login で複数テナントの場合)
 interface TenantOption { id: string; name: string }
 const tenantOptions = ref<TenantOption[]>([])
@@ -49,8 +52,13 @@ onMounted(() => {
   consumeFragment()
   loadFromStorage()
 
-  // テナント選択パラメータをチェック
+  // エラー・テナント選択パラメータをチェック
   const params = new URLSearchParams(window.location.search)
+  const errorParam = params.get('error')
+  if (errorParam) {
+    loginError.value = errorParam
+    window.history.replaceState({}, '', window.location.pathname)
+  }
   const tenantsParam = params.get('tenants')
   if (tenantsParam) {
     try {
@@ -98,6 +106,9 @@ onMounted(() => {
       </div>
       <!-- ログイン画面 -->
       <div v-else-if="!isAuthenticated" class="text-center py-20">
+        <div v-if="loginError" class="mb-6 mx-auto max-w-md bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
+          {{ loginError }}
+        </div>
         <p class="text-gray-500 mb-4">ログインしてください</p>
         <div class="flex flex-col items-center gap-3">
           <button @click="redirectToLogin"
