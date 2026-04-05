@@ -37,6 +37,8 @@ const form = reactive({
   channel_secret: '',
   key_id: '',
   private_key: '',
+  login_channel_id: '',
+  login_channel_secret: '',
 })
 
 async function load() {
@@ -141,10 +143,13 @@ async function save() {
         key_id: form.key_id,
         private_key: form.private_key,
         bot_basic_id: botBasicId.value || null,
+        login_channel_id: form.login_channel_id || null,
+        login_channel_secret: form.login_channel_secret || null,
       }),
     })
     form.channel_secret = ''
     form.private_key = ''
+    form.login_channel_secret = ''
     publicKeyPem.value = ''
     success.value = '保存しました'
   } catch (e: any) {
@@ -164,6 +169,8 @@ async function remove() {
     form.channel_secret = ''
     form.key_id = ''
     form.private_key = ''
+    form.login_channel_id = ''
+    form.login_channel_secret = ''
     publicKeyPem.value = ''
     success.value = '削除しました'
   } catch (e: any) {
@@ -288,6 +295,28 @@ onMounted(load)
                       :placeholder="publicKeyPem ? '(Step 1 で自動入力済み)' : '-----BEGIN PRIVATE KEY-----'"
                       :class="{ 'bg-green-50': form.private_key && publicKeyPem }" />
             <p v-if="form.private_key && publicKeyPem" class="text-xs text-green-600 mt-1">✓ Step 1 で生成済み</p>
+          </div>
+        </div>
+
+        <!-- LINE Login (オプション) -->
+        <div class="border-t pt-3 mt-3">
+          <h4 class="text-sm font-medium text-gray-700 mb-2">LINE Login (オプション)</h4>
+          <p class="text-xs text-gray-400 mb-3">
+            LINE ユーザーが nuxt-notify にログインできるようにします。
+            Messaging API と<strong>同じプロバイダー</strong>に LINE Login チャネルを作成してください。
+          </p>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login Channel ID</label>
+              <input v-model="form.login_channel_id" class="w-full border rounded px-3 py-2 text-sm font-mono"
+                     placeholder="LINE Login チャネルの Channel ID">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login Channel Secret</label>
+              <input v-model="form.login_channel_secret" type="password"
+                     class="w-full border rounded px-3 py-2 text-sm font-mono"
+                     :placeholder="config ? '(変更する場合のみ入力)' : 'Channel Secret'">
+            </div>
           </div>
         </div>
 

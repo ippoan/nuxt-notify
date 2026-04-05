@@ -2,6 +2,15 @@
 import { useAuth } from '@ippoan/auth-client'
 
 const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin, logout } = useAuth()
+const runtimeConfig = useRuntimeConfig()
+
+const lineLoginUrl = computed(() => {
+  const apiBase = runtimeConfig.public.apiBase as string
+  const channelId = runtimeConfig.public.lineChannelId as string
+  if (!channelId) return ''
+  const redirectUri = encodeURIComponent(window.location.origin + '/?lw_callback=1')
+  return `${apiBase}/api/auth/line/redirect?channel_id=${channelId}&redirect_uri=${redirectUri}`
+})
 
 onMounted(() => {
   consumeFragment()
@@ -30,10 +39,16 @@ onMounted(() => {
     <main class="max-w-5xl mx-auto px-4 py-6">
       <div v-if="!isAuthenticated" class="text-center py-20">
         <p class="text-gray-500 mb-4">ログインしてください</p>
-        <button @click="redirectToLogin"
-                class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
-          Google でログイン
-        </button>
+        <div class="flex flex-col items-center gap-3">
+          <button @click="redirectToLogin"
+                  class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 w-56">
+            Google でログイン
+          </button>
+          <a v-if="lineLoginUrl" :href="lineLoginUrl"
+             class="bg-[#06C755] text-white px-6 py-2 rounded hover:bg-[#05a847] w-56 text-center inline-block">
+            LINE でログイン
+          </a>
+        </div>
       </div>
       <NuxtPage v-else />
     </main>

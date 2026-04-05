@@ -14,6 +14,7 @@ export default defineNuxtConfig({
       apiBase: 'http://localhost:8080',
       authWorkerUrl: 'https://auth.mtamaramu.com',
       stagingTenantId: '',
+      lineChannelId: '',
     },
   },
 })
