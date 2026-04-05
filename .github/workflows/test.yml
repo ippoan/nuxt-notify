@@ -17,6 +17,7 @@ jobs:
     uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
     with:
       project_type: 'nuxt'
+      install_command: 'npm install'
       npm_scope: '@ippoan'
       use_auth_client_dev: true
     secrets: inherit
