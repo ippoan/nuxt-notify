@@ -6,6 +6,9 @@ interface LineConfigResponse {
   name: string
   channel_id: string
   bot_basic_id: string | null
+  public_key_jwk: string | null
+  login_channel_id: string | null
+  login_key_id: string | null
   enabled: boolean
   created_at: string
 }
@@ -38,7 +41,7 @@ const form = reactive({
   key_id: '',
   private_key: '',
   login_channel_id: '',
-  login_channel_secret: '',
+  login_key_id: '',
 })
 
 async function load() {
@@ -143,13 +146,14 @@ async function save() {
         key_id: form.key_id,
         private_key: form.private_key,
         bot_basic_id: botBasicId.value || null,
+        public_key_jwk: publicKeyPem.value || null,
         login_channel_id: form.login_channel_id || null,
-        login_channel_secret: form.login_channel_secret || null,
+        login_key_id: form.login_key_id || null,
       }),
     })
     form.channel_secret = ''
     form.private_key = ''
-    form.login_channel_secret = ''
+    form.login_key_id = ''
     publicKeyPem.value = ''
     success.value = '保存しました'
   } catch (e: any) {
@@ -170,7 +174,7 @@ async function remove() {
     form.key_id = ''
     form.private_key = ''
     form.login_channel_id = ''
-    form.login_channel_secret = ''
+    form.login_key_id = ''
     publicKeyPem.value = ''
     success.value = '削除しました'
   } catch (e: any) {
@@ -197,10 +201,15 @@ onMounted(load)
       <div v-if="config" class="bg-green-50 border border-green-200 rounded-lg p-4">
         <div class="flex justify-between items-center">
           <div>
-            <span class="text-green-700 font-medium">✓ 設定済み</span>
+            <span class="text-green-700 font-medium">✓ Messaging API 設定済み</span>
             <span class="text-sm text-gray-500 ml-2">{{ config.name }} ({{ config.channel_id }})</span>
           </div>
           <button @click="remove" class="text-red-500 hover:text-red-700 text-sm">削除</button>
+        </div>
+        <div class="mt-2">
+          <span v-if="config.login_channel_id" class="text-green-700 font-medium text-sm">✓ LINE Login 設定済み</span>
+          <span v-if="config.login_channel_id" class="text-sm text-gray-500 ml-2">({{ config.login_channel_id }})</span>
+          <span v-else class="text-orange-600 text-sm">△ LINE Login 未設定</span>
         </div>
       </div>
 
@@ -215,7 +224,22 @@ onMounted(load)
           {{ generating ? '生成中...' : '鍵ペアを生成' }}
         </button>
 
-        <!-- 公開鍵表示 -->
+        <!-- 保存済み公開鍵の再表示 -->
+        <div v-if="!publicKeyPem && config?.public_key_jwk" class="mt-3">
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            保存済み公開鍵 JWK (LINE Login チャネルにも同じ鍵を登録)
+          </label>
+          <textarea :value="config.public_key_jwk" readonly rows="7"
+                    class="w-full border rounded px-3 py-2 text-xs font-mono bg-gray-50 select-all" />
+          <div class="mt-2 flex gap-2">
+            <button @click="navigator.clipboard.writeText(config!.public_key_jwk!); success = 'コピーしました'"
+                    class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
+              コピー
+            </button>
+          </div>
+        </div>
+
+        <!-- 新規生成した公開鍵表示 -->
         <div v-if="publicKeyPem" class="mt-3">
           <label class="block text-sm font-medium text-gray-700 mb-1">
             公開鍵 JWK (LINE Developers Console にコピー)
@@ -312,10 +336,11 @@ onMounted(load)
                      placeholder="LINE Login チャネルの Channel ID">
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login Channel Secret</label>
-              <input v-model="form.login_channel_secret" type="password"
+              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login kid</label>
+              <input v-model="form.login_key_id"
                      class="w-full border rounded px-3 py-2 text-sm font-mono"
-                     :placeholder="config ? '(変更する場合のみ入力)' : 'Channel Secret'">
+                     placeholder="LINE Login チャネルに同じ公開鍵を登録して kid を入力">
+              <p class="text-xs text-gray-400 mt-1">Messaging API と同じ公開鍵を LINE Login チャネルにも登録してください</p>
             </div>
           </div>
         </div>
