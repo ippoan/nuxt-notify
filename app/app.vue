@@ -6,10 +6,8 @@ const runtimeConfig = useRuntimeConfig()
 
 const lineLoginUrl = computed(() => {
   const apiBase = runtimeConfig.public.apiBase as string
-  const channelId = runtimeConfig.public.lineChannelId as string
-  if (!channelId) return ''
   const redirectUri = encodeURIComponent(window.location.origin + '/?lw_callback=1')
-  return `${apiBase}/api/auth/line/redirect?channel_id=${channelId}&redirect_uri=${redirectUri}`
+  return `${apiBase}/api/auth/line/redirect?redirect_uri=${redirectUri}`
 })
 
 onMounted(() => {
