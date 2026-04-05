@@ -18,6 +18,22 @@ const error = ref('')
 const success = ref('')
 const generating = ref(false)
 const publicKeyPem = ref('')
+const botBasicId = ref(import.meta.client ? (localStorage.getItem('notify_bot_basic_id') || '') : '')
+
+// Bot Basic ID を localStorage に保存
+watch(botBasicId, (v) => {
+  if (import.meta.client && v) localStorage.setItem('notify_bot_basic_id', v)
+})
+
+const friendAddUrl = computed(() => {
+  const id = botBasicId.value.replace(/^@/, '')
+  return `https://line.me/R/ti/p/@${id}`
+})
+
+const qrCodeUrl = computed(() => {
+  // Google Charts API で QR コード生成
+  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(friendAddUrl.value)}`
+})
 
 const form = reactive({
   name: '',
@@ -287,6 +303,27 @@ onMounted(load)
           {{ apiBase }}/api/notify/line/webhook
         </code>
         <p class="text-xs text-gray-400 mt-1">Webhookの利用を「ON」にしてください</p>
+      </div>
+
+      <!-- Step 4: 友達追加 QR コード -->
+      <div v-if="config" class="bg-white rounded-lg shadow border p-4">
+        <h3 class="font-medium mb-3">Step 4: 受信者を追加 (友達追加 QR)</h3>
+        <p class="text-sm text-gray-500 mb-3">
+          LINE Bot を友達追加すると、受信者として自動登録されます。<br>
+          Bot Basic ID を入力して QR コードを表示してください。
+        </p>
+        <div class="mb-3">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Bot Basic ID</label>
+          <input v-model="botBasicId" class="w-full border rounded px-3 py-2 text-sm font-mono"
+                 placeholder="@123abcde (LINE Developers Console → Messaging API設定)">
+          <p class="text-xs text-gray-400 mt-1">Messaging API設定 → ボット情報 → Bot basic ID</p>
+        </div>
+        <div v-if="botBasicId" class="text-center bg-gray-50 rounded p-6">
+          <img :src="qrCodeUrl" alt="LINE Bot QR Code" class="mx-auto w-48 h-48 mb-3" />
+          <p class="text-sm font-medium mb-1">{{ botBasicId }}</p>
+          <a :href="friendAddUrl" target="_blank"
+             class="text-blue-600 text-sm underline">LINE で開く</a>
+        </div>
       </div>
 
       <!-- メッセージ -->
