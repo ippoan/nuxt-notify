@@ -60,9 +60,16 @@ async function generateKeyPair() {
       ['sign', 'verify'],
     )
 
-    // 公開鍵 → PEM (LINE Console に貼る)
-    const pubDer = await crypto.subtle.exportKey('spki', keyPair.publicKey)
-    publicKeyPem.value = derToPem(pubDer, 'PUBLIC KEY')
+    // 公開鍵 → JWK JSON (LINE Console に貼る)
+    const pubJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+    // LINE が要求する形式: {"kty":"RSA","alg":"RS256","use":"sig","e":"...","n":"..."}
+    publicKeyPem.value = JSON.stringify({
+      kty: pubJwk.kty,
+      alg: 'RS256',
+      use: 'sig',
+      e: pubJwk.e,
+      n: pubJwk.n,
+    }, null, 2)
 
     // 秘密鍵 → PEM (フォームに自動入力)
     const privDer = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
@@ -88,11 +95,11 @@ async function copyPublicKey() {
 }
 
 function downloadPublicKey() {
-  const blob = new Blob([publicKeyPem.value], { type: 'application/x-pem-file' })
+  const blob = new Blob([publicKeyPem.value], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'line-public-key.pem'
+  a.download = 'line-public-key.jwk.json'
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -190,9 +197,9 @@ onMounted(load)
         <!-- 公開鍵表示 -->
         <div v-if="publicKeyPem" class="mt-3">
           <label class="block text-sm font-medium text-gray-700 mb-1">
-            公開鍵 (LINE Developers Console にコピー)
+            公開鍵 JWK (LINE Developers Console にコピー)
           </label>
-          <textarea :value="publicKeyPem" readonly rows="8"
+          <textarea :value="publicKeyPem" readonly rows="7"
                     class="w-full border rounded px-3 py-2 text-xs font-mono bg-yellow-50 select-all" />
           <div class="mt-2 flex gap-2 flex-wrap">
             <button @click="copyPublicKey"
