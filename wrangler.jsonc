@@ -1,0 +1,20 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "nuxt-notify",
+	"account_id": "24b45709d060d957340180e995f0d373",
+	"compatibility_date": "2025-07-15",
+	"main": ".output/server/index.mjs",
+	"assets": {
+		"directory": ".output/public"
+	},
+	"env": {
+		"staging": {
+			"name": "nuxt-notify-staging",
+			"vars": {
+				"NUXT_PUBLIC_API_BASE": "https://rust-alc-api-staging-566bls5vfq-an.a.run.app",
+				"NUXT_PUBLIC_AUTH_WORKER_URL": "https://auth-worker-staging.m-tama-ramu.workers.dev",
+				"NUXT_PUBLIC_STAGING_TENANT_ID": "11111111-1111-1111-1111-111111111111"
+			}
+		}
+	}
+}

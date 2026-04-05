@@ -5,6 +5,10 @@ export default defineNuxtConfig({
 
   modules: ['@nuxtjs/tailwindcss'],
 
+  nitro: {
+    preset: 'cloudflare_module',
+  },
+
   runtimeConfig: {
     public: {
       apiBase: 'http://localhost:8080',

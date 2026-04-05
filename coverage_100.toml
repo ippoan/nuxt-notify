@@ -1,0 +1,6 @@
+# Coverage 100% 達成ファイル登録簿
+# CI でリグレッション検出に使用
+
+[[files]]
+path = "app/composables/useApi.ts"
+branches = true
