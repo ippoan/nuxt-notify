@@ -86,6 +86,32 @@ async function toggle(r: Recipient) {
   }
 }
 
+const editingId = ref<string | null>(null)
+const editName = ref('')
+
+function startEdit(r: Recipient) {
+  editingId.value = r.id
+  editName.value = r.name
+}
+
+async function saveName(r: Recipient) {
+  if (!editName.value.trim()) return
+  try {
+    await apiFetch(`/notify/recipients/${r.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: editName.value.trim() }),
+    })
+    editingId.value = null
+    await load()
+  } catch (e: any) {
+    alert('更新失敗: ' + (e.message || String(e)))
+  }
+}
+
+function cancelEdit() {
+  editingId.value = null
+}
+
 onMounted(load)
 </script>
 
@@ -154,7 +180,16 @@ onMounted(load)
       </thead>
       <tbody>
         <tr v-for="r in recipients" :key="r.id" class="border-t">
-          <td class="px-4 py-2">{{ r.name }}</td>
+          <td class="px-4 py-2">
+            <div v-if="editingId === r.id" class="flex gap-1">
+              <input v-model="editName" @keyup.enter="saveName(r)" @keyup.escape="cancelEdit"
+                     class="border rounded px-2 py-1 text-sm w-32" autofocus />
+              <button @click="saveName(r)" class="text-green-600 text-xs">✓</button>
+              <button @click="cancelEdit" class="text-gray-400 text-xs">✕</button>
+            </div>
+            <span v-else @click="startEdit(r)" class="cursor-pointer hover:text-blue-600"
+                  title="クリックで編集">{{ r.name }}</span>
+          </td>
           <td class="px-4 py-2">
             <span :class="r.provider === 'line' ? 'text-green-600' : 'text-blue-600'" class="font-medium">
               {{ r.provider === 'line' ? 'LINE' : 'LINE WORKS' }}
