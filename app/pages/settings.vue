@@ -5,6 +5,7 @@ interface LineConfigResponse {
   id: string
   name: string
   channel_id: string
+  bot_basic_id: string | null
   enabled: boolean
   created_at: string
 }
@@ -18,20 +19,15 @@ const error = ref('')
 const success = ref('')
 const generating = ref(false)
 const publicKeyPem = ref('')
-const botBasicId = ref(import.meta.client ? (localStorage.getItem('notify_bot_basic_id') || '') : '')
-
-// Bot Basic ID を localStorage に保存
-watch(botBasicId, (v) => {
-  if (import.meta.client && v) localStorage.setItem('notify_bot_basic_id', v)
-})
+const botBasicId = ref('')
 
 const friendAddUrl = computed(() => {
-  const id = botBasicId.value.replace(/^@/, '')
-  return `https://line.me/R/ti/p/@${id}`
+  const id = (config.value?.bot_basic_id || botBasicId.value || '').replace(/^@/, '')
+  return id ? `https://line.me/R/ti/p/@${id}` : ''
 })
 
 const qrCodeUrl = computed(() => {
-  // Google Charts API で QR コード生成
+  if (!friendAddUrl.value) return ''
   return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(friendAddUrl.value)}`
 })
 
@@ -51,6 +47,7 @@ async function load() {
     if (config.value) {
       form.name = config.value.name
       form.channel_id = config.value.channel_id
+      botBasicId.value = config.value.bot_basic_id || ''
     }
   } catch (e: any) {
     error.value = e.message || String(e)
@@ -143,6 +140,7 @@ async function save() {
         channel_secret: form.channel_secret,
         key_id: form.key_id,
         private_key: form.private_key,
+        bot_basic_id: botBasicId.value || null,
       }),
     })
     form.channel_secret = ''
@@ -271,6 +269,13 @@ onMounted(load)
           </div>
 
           <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Bot Basic ID</label>
+            <input v-model="botBasicId" class="w-full border rounded px-3 py-2 text-sm font-mono"
+                   placeholder="@123abcde">
+            <p class="text-xs text-gray-400 mt-1">Messaging API設定 → ボット情報 → Bot basic ID</p>
+          </div>
+
+          <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">kid (公開鍵登録後に表示される)</label>
             <input v-model="form.key_id" class="w-full border rounded px-3 py-2 text-sm font-mono"
                    placeholder="公開鍵を登録すると表示されます">
@@ -306,21 +311,14 @@ onMounted(load)
       </div>
 
       <!-- Step 4: 友達追加 QR コード -->
-      <div v-if="config" class="bg-white rounded-lg shadow border p-4">
+      <div v-if="config && config.bot_basic_id" class="bg-white rounded-lg shadow border p-4">
         <h3 class="font-medium mb-3">Step 4: 受信者を追加 (友達追加 QR)</h3>
         <p class="text-sm text-gray-500 mb-3">
-          LINE Bot を友達追加すると、受信者として自動登録されます。<br>
-          Bot Basic ID を入力して QR コードを表示してください。
+          LINE Bot を友達追加すると、受信者として自動登録されます。
         </p>
-        <div class="mb-3">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Bot Basic ID</label>
-          <input v-model="botBasicId" class="w-full border rounded px-3 py-2 text-sm font-mono"
-                 placeholder="@123abcde (LINE Developers Console → Messaging API設定)">
-          <p class="text-xs text-gray-400 mt-1">Messaging API設定 → ボット情報 → Bot basic ID</p>
-        </div>
-        <div v-if="botBasicId" class="text-center bg-gray-50 rounded p-6">
+        <div class="text-center bg-gray-50 rounded p-6">
           <img :src="qrCodeUrl" alt="LINE Bot QR Code" class="mx-auto w-48 h-48 mb-3" />
-          <p class="text-sm font-medium mb-1">{{ botBasicId }}</p>
+          <p class="text-sm font-medium mb-1">{{ config?.bot_basic_id }}</p>
           <a :href="friendAddUrl" target="_blank"
              class="text-blue-600 text-sm underline">LINE で開く</a>
         </div>
