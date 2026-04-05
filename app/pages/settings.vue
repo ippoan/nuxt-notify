@@ -7,8 +7,6 @@ interface LineConfigResponse {
   channel_id: string
   bot_basic_id: string | null
   public_key_jwk: string | null
-  login_channel_id: string | null
-  login_key_id: string | null
   enabled: boolean
   created_at: string
 }
@@ -40,8 +38,6 @@ const form = reactive({
   channel_secret: '',
   key_id: '',
   private_key: '',
-  login_channel_id: '',
-  login_key_id: '',
 })
 
 async function load() {
@@ -154,13 +150,10 @@ async function save() {
         private_key: form.private_key,
         bot_basic_id: botBasicId.value || null,
         public_key_jwk: publicKeyPem.value || null,
-        login_channel_id: form.login_channel_id || null,
-        login_key_id: form.login_key_id || null,
       }),
     })
     form.channel_secret = ''
     form.private_key = ''
-    form.login_key_id = ''
     publicKeyPem.value = ''
     success.value = '保存しました'
   } catch (e: any) {
@@ -180,8 +173,6 @@ async function remove() {
     form.channel_secret = ''
     form.key_id = ''
     form.private_key = ''
-    form.login_channel_id = ''
-    form.login_key_id = ''
     publicKeyPem.value = ''
     success.value = '削除しました'
   } catch (e: any) {
@@ -212,11 +203,6 @@ onMounted(load)
             <span class="text-sm text-gray-500 ml-2">{{ config.name }} ({{ config.channel_id }})</span>
           </div>
           <button @click="remove" class="text-red-500 hover:text-red-700 text-sm">削除</button>
-        </div>
-        <div class="mt-2">
-          <span v-if="config.login_channel_id" class="text-green-700 font-medium text-sm">✓ LINE Login 設定済み</span>
-          <span v-if="config.login_channel_id" class="text-sm text-gray-500 ml-2">({{ config.login_channel_id }})</span>
-          <span v-else class="text-orange-600 text-sm">△ LINE Login 未設定</span>
         </div>
       </div>
 
@@ -326,29 +312,6 @@ onMounted(load)
                       :placeholder="publicKeyPem ? '(Step 1 で自動入力済み)' : '-----BEGIN PRIVATE KEY-----'"
                       :class="{ 'bg-green-50': form.private_key && publicKeyPem }" />
             <p v-if="form.private_key && publicKeyPem" class="text-xs text-green-600 mt-1">✓ Step 1 で生成済み</p>
-          </div>
-        </div>
-
-        <!-- LINE Login (オプション) -->
-        <div class="border-t pt-3 mt-3">
-          <h4 class="text-sm font-medium text-gray-700 mb-2">LINE Login (オプション)</h4>
-          <p class="text-xs text-gray-400 mb-3">
-            LINE ユーザーが nuxt-notify にログインできるようにします。
-            Messaging API と<strong>同じプロバイダー</strong>に LINE Login チャネルを作成してください。
-          </p>
-          <div class="space-y-3">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login Channel ID</label>
-              <input v-model="form.login_channel_id" class="w-full border rounded px-3 py-2 text-sm font-mono"
-                     placeholder="LINE Login チャネルの Channel ID">
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">LINE Login kid</label>
-              <input v-model="form.login_key_id"
-                     class="w-full border rounded px-3 py-2 text-sm font-mono"
-                     placeholder="LINE Login チャネルに同じ公開鍵を登録して kid を入力">
-              <p class="text-xs text-gray-400 mt-1">Messaging API と同じ公開鍵を LINE Login チャネルにも登録してください</p>
-            </div>
           </div>
         </div>
 
