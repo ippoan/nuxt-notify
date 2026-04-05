@@ -1,47 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
+
+// Mock @ippoan/auth-client
+const mockToken = ref<string | null>(null)
+const mockOrgId = ref<string | null>(null)
+vi.mock('@ippoan/auth-client', () => ({
+  useAuth: () => ({
+    token: mockToken,
+    orgId: mockOrgId,
+  }),
+}))
 
 // Mock Nuxt auto-imports
 const mockFetch = vi.fn()
 vi.stubGlobal('$fetch', mockFetch)
-vi.stubGlobal('computed', computed)
-
-let mockConfig = {
-  public: {
-    apiBase: 'http://localhost:8080',
-    authWorkerUrl: 'https://auth.example.com',
-    stagingTenantId: '',
-  },
-}
-vi.stubGlobal('useRuntimeConfig', () => mockConfig)
-
-// Mock useState (Nuxt)
-const stateStore: Record<string, any> = {}
-vi.stubGlobal('useState', (key: string, init?: () => any) => {
-  if (!(key in stateStore)) stateStore[key] = ref(init ? init() : null)
-  return stateStore[key]
-})
-
-// Stub useAuth as global (Nuxt auto-import)
-// Import useAuth module first so we can use it
-const authModule = await import('../../app/composables/useAuth')
-vi.stubGlobal('useAuth', authModule.useAuth)
+vi.stubGlobal('useRuntimeConfig', () => ({
+  public: { apiBase: 'http://localhost:8080' },
+}))
 
 const { useApi } = await import('../../app/composables/useApi')
 
 describe('useApi', () => {
   beforeEach(() => {
     mockFetch.mockReset()
-    const auth = authModule.useAuth()
-    auth.token.value = null
-    auth.tenantId.value = null
-    mockConfig = {
-      public: {
-        apiBase: 'http://localhost:8080',
-        authWorkerUrl: 'https://auth.example.com',
-        stagingTenantId: '',
-      },
-    }
+    mockToken.value = null
+    mockOrgId.value = null
   })
 
   it('GET request with no auth', async () => {
@@ -71,9 +54,8 @@ describe('useApi', () => {
   })
 
   it('adds Authorization header when JWT token exists', async () => {
-    const auth = authModule.useAuth()
-    auth.token.value = 'jwt-test-token'
-    auth.tenantId.value = 'tenant-123'
+    mockToken.value = 'jwt-test-token'
+    mockOrgId.value = 'tenant-123'
     mockFetch.mockResolvedValue([])
 
     const { apiFetch } = useApi()
@@ -89,10 +71,9 @@ describe('useApi', () => {
     })
   })
 
-  it('adds X-Tenant-ID when no JWT but tenantId exists', async () => {
-    const auth = authModule.useAuth()
-    auth.token.value = null
-    auth.tenantId.value = '11111111-1111-1111-1111-111111111111'
+  it('adds X-Tenant-ID when no JWT but orgId exists', async () => {
+    mockToken.value = null
+    mockOrgId.value = '11111111-1111-1111-1111-111111111111'
     mockFetch.mockResolvedValue([])
 
     const { apiFetch } = useApi()

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-const config = useRuntimeConfig()
-const { isAuthenticated, init, redirectToLogin, logout } = useAuth()
-const stagingTenantId = computed(() => config.public.stagingTenantId as string)
+import { useAuth } from '@ippoan/auth-client'
+
+const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin, logout } = useAuth()
 
 onMounted(() => {
-  init()
+  consumeFragment()
+  loadFromStorage()
 })
 </script>
 
@@ -20,7 +21,7 @@ onMounted(() => {
             <NuxtLink to="/test-distribute" class="text-gray-600 hover:text-blue-600">テスト配信</NuxtLink>
             <NuxtLink to="/settings" class="text-gray-600 hover:text-blue-600">設定</NuxtLink>
           </nav>
-          <button v-if="isAuthenticated && !stagingTenantId" @click="logout"
+          <button v-if="isAuthenticated" @click="logout"
                   class="text-xs text-gray-400 hover:text-red-500">ログアウト</button>
         </div>
       </div>
@@ -36,9 +37,5 @@ onMounted(() => {
       </div>
       <NuxtPage v-else />
     </main>
-
-    <div v-if="stagingTenantId" class="fixed bottom-0 left-0 right-0 bg-yellow-400 text-center py-1 text-xs font-bold">
-      STAGING (tenant: {{ stagingTenantId.slice(0, 8) }}...)
-    </div>
   </div>
 </template>
