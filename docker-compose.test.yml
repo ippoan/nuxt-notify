@@ -1,0 +1,2 @@
+# Empty compose file — integration tests hit staging API directly (no local containers)
+services: {}
