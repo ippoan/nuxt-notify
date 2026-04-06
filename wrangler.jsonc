@@ -10,9 +10,12 @@
 	"env": {
 		"staging": {
 			"name": "nuxt-notify-staging",
+			"routes": [
+				{ "pattern": "notify-staging.ippoan.org", "custom_domain": true }
+			],
 			"vars": {
 				"NUXT_PUBLIC_API_BASE": "https://rust-alc-api-staging-566bls5vfq-an.a.run.app",
-				"NUXT_PUBLIC_AUTH_WORKER_URL": "https://auth-worker-staging.m-tama-ramu.workers.dev"
+				"NUXT_PUBLIC_AUTH_WORKER_URL": "https://auth-staging.ippoan.org"
 			}
 		}
 	}
