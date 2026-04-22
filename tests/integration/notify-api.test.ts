@@ -95,22 +95,41 @@ describe.skipIf(skip)('notify API integration', () => {
   })
 
   // --- Test Distribute ---
-  it('POST /notify/test-distribute — with no active recipients', async () => {
+  it('POST /notify/test-distribute — empty recipient_ids returns 400', async () => {
+    const { status } = await api('/notify/test-distribute', {
+      method: 'POST',
+      body: { message: 'Integration test message', recipient_ids: [] },
+    })
+    expect(status).toBe(400)
+  })
+
+  it('POST /notify/test-distribute — with selected recipient_ids', async () => {
     // Clean up any test recipients
-    const { data: recipients } = await api('/notify/recipients')
-    for (const r of recipients as any[]) {
+    const { data: existing } = await api('/notify/recipients')
+    for (const r of existing as any[]) {
       if (r.name.includes('Integration Test')) {
         await api(`/notify/recipients/${r.id}`, { method: 'DELETE' })
       }
     }
 
+    // Get one enabled recipient id to target
+    const { data: recipients } = await api('/notify/recipients')
+    const target = (recipients as any[]).find((r) => r.enabled)
+    const recipient_ids = target ? [target.id] : []
+
+    if (recipient_ids.length === 0) {
+      // No enabled recipient available in this env — skip the 200 path
+      return
+    }
+
     const { status, data } = await api('/notify/test-distribute', {
       method: 'POST',
-      body: { message: 'Integration test message' },
+      body: { message: 'Integration test message', recipient_ids },
     })
     expect(status).toBe(200)
-    // seed recipients exist but have no real LINE/LW credentials → failed or sent=0
+    // seed recipients have no real LINE/LW credentials → failed or sent=0
     expect(typeof data.total).toBe('number')
+    expect(data.total).toBeLessThanOrEqual(recipient_ids.length)
   })
 
   // --- Read Tracker ---
