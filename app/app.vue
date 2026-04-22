@@ -111,7 +111,7 @@ onMounted(() => {
         </div>
         <p class="text-gray-500 mb-4">ログインしてください</p>
         <div class="flex flex-col items-center gap-3">
-          <button @click="redirectToLogin"
+          <button @click="() => redirectToLogin()"
                   class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 w-56">
             Google でログイン
           </button>
