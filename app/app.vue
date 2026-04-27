@@ -81,6 +81,7 @@ onMounted(() => {
           <nav v-if="isAuthenticated" class="flex gap-4 text-sm">
             <NuxtLink to="/" class="text-gray-600 hover:text-blue-600">ダッシュボード</NuxtLink>
             <NuxtLink to="/recipients" class="text-gray-600 hover:text-blue-600">受信者</NuxtLink>
+            <NuxtLink to="/lineworks-groups" class="text-gray-600 hover:text-blue-600">グループ</NuxtLink>
             <NuxtLink to="/test-distribute" class="text-gray-600 hover:text-blue-600">テスト配信</NuxtLink>
             <NuxtLink to="/settings" class="text-gray-600 hover:text-blue-600">配信設定</NuxtLink>
           </nav>
