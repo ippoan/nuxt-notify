@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useAuth } from '@ippoan/auth-client'
+import { useAuth, AuthToolbar } from '@ippoan/auth-client'
 
-const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin, logout } = useAuth()
+const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin } = useAuth()
 const runtimeConfig = useRuntimeConfig()
 const { apiFetch } = useApi()
 
@@ -82,10 +82,18 @@ onMounted(() => {
             <NuxtLink to="/" class="text-gray-600 hover:text-blue-600">ダッシュボード</NuxtLink>
             <NuxtLink to="/recipients" class="text-gray-600 hover:text-blue-600">受信者</NuxtLink>
             <NuxtLink to="/test-distribute" class="text-gray-600 hover:text-blue-600">テスト配信</NuxtLink>
-            <NuxtLink to="/settings" class="text-gray-600 hover:text-blue-600">設定</NuxtLink>
+            <NuxtLink to="/settings" class="text-gray-600 hover:text-blue-600">配信設定</NuxtLink>
           </nav>
-          <button v-if="isAuthenticated" @click="logout"
-                  class="text-xs text-gray-400 hover:text-red-500">ログアウト</button>
+          <AuthToolbar
+            v-if="isAuthenticated"
+            :show-copy-url="false"
+            :show-qr="false"
+            :show-apps="true"
+            :show-settings="true"
+            :show-logout="true"
+            :show-user-info="true"
+            :show-org-slug="true"
+          />
         </div>
       </div>
     </header>
