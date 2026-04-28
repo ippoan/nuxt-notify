@@ -215,10 +215,11 @@ const ingestEmailAddress = computed(() => {
 
 async function loadTenantSlug() {
   try {
-    const me = await apiFetch<{ tenant?: { slug?: string } }>('/auth/me')
-    tenantSlug.value = me?.tenant?.slug ?? ''
+    // /auth/me は flat な tenant_slug を返す (rust-alc-api#295)
+    const me = await apiFetch<{ tenant_slug?: string }>('/auth/me')
+    tenantSlug.value = me?.tenant_slug ?? ''
   } catch {
-    // /auth/me が無いテナントは tenantId をそのまま使う
+    // /auth/me が呼べないテナントは tenant_id をフォールバック表示 (アドレス組み立てには使えないが UI 上の表示崩れを防ぐ)
     tenantSlug.value = orgId.value ?? ''
   }
 }
