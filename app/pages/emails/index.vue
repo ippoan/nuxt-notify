@@ -76,7 +76,11 @@ onMounted(load)
     </div>
     <div v-else-if="emails.length === 0" class="text-gray-500 py-10 text-center">
       受信メールはまだありません。<br>
-      <span class="text-xs">ingest 用アドレスは「設定」ページから確認できます。</span>
+      <span class="text-xs">
+        受信用メールアドレスは
+        <NuxtLink to="/settings" class="text-blue-600 hover:underline">配信設定</NuxtLink>
+        ページの「Email 受信設定」セクションで確認できます。
+      </span>
     </div>
     <table v-else class="min-w-full bg-white border border-gray-200 text-sm">
       <thead class="bg-gray-50 text-left text-xs text-gray-600 uppercase">
