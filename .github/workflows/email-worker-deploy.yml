@@ -1,4 +1,4 @@
-name: Deploy Email Worker
+name: Email Worker CI
 
 on:
   push:
@@ -6,43 +6,31 @@ on:
     paths:
       - 'workers/email-receiver/**'
       - '.github/workflows/email-worker-deploy.yml'
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+    paths:
+      - 'workers/email-receiver/**'
+      - '.github/workflows/email-worker-deploy.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+  packages: read
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        env: ['', 'staging']
-    name: Deploy ${{ matrix.env || 'production' }}
-    defaults:
-      run:
-        working-directory: workers/email-receiver
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: workers/email-receiver/package-lock.json
-
-      - name: Install
-        run: npm ci
-
-      - name: Typecheck
-        run: npx tsc --noEmit
-
-      - name: Test
-        run: npx vitest run
-
-      - name: Deploy (${{ matrix.env || 'production' }})
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          workingDirectory: workers/email-receiver
-          command: deploy ${{ matrix.env && format('--env {0}', matrix.env) || '' }}
+  ci:
+    uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
+    with:
+      project_type: 'worker'
+      working_directory: 'workers/email-receiver'
+      cache_dependency_path: 'workers/email-receiver/package-lock.json'
+      install_command: 'npm ci'
+      typecheck_command: 'npx tsc --noEmit'
+      test_command: 'npx vitest run'
+      has_integration: false
+      has_tests: true
+      has_deploy: true
+      has_staging_deploy: true
+    secrets: inherit
