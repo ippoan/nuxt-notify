@@ -6,6 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 # 本番: notify.ippoan.org に届いたメールを受ける
 [vars]
 INGEST_ENDPOINT = "https://alc-api.ippoan.org/api/notify/ingest"
+ALLOWED_HOSTS = "notify.ippoan.org"
 
 # テナントごとの ingest_key を保持 (key=local-part, value=plaintext key)
 # 例: tenant-acme@notify.ippoan.org → KV.get("tenant-acme") → ingest_key
@@ -18,6 +19,7 @@ name = "notify-email-receiver-staging"
 
 [env.staging.vars]
 INGEST_ENDPOINT = "https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/notify/ingest"
+ALLOWED_HOSTS = "notify-staging.ippoan.org"
 
 [[env.staging.kv_namespaces]]
 binding = "INGEST_KEYS_KV"

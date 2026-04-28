@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import worker, { uint8ArrayToBase64 } from "../src/index";
+import worker, { isHostAllowed, uint8ArrayToBase64 } from "../src/index";
 
 function makeMessage(overrides: Partial<{
   to: string;
@@ -48,6 +48,28 @@ function makeEnv(overrides: Partial<{
   };
 }
 
+describe("isHostAllowed", () => {
+  it("returns true when ALLOWED_HOSTS is undefined", () => {
+    expect(isHostAllowed("any.example.com")).toBe(true);
+  });
+
+  it("matches single host", () => {
+    expect(isHostAllowed("notify.ippoan.org", "notify.ippoan.org")).toBe(true);
+    expect(isHostAllowed("evil.com", "notify.ippoan.org")).toBe(false);
+  });
+
+  it("matches comma-separated host list with whitespace", () => {
+    const list = " notify.ippoan.org , notify-staging.ippoan.org ";
+    expect(isHostAllowed("notify.ippoan.org", list)).toBe(true);
+    expect(isHostAllowed("notify-staging.ippoan.org", list)).toBe(true);
+    expect(isHostAllowed("ippoan.org", list)).toBe(false);
+  });
+
+  it("is case insensitive on host", () => {
+    expect(isHostAllowed("Notify.Ippoan.Org", "notify.ippoan.org")).toBe(true);
+  });
+});
+
 describe("uint8ArrayToBase64", () => {
   it("encodes empty bytes to empty string", () => {
     expect(uint8ArrayToBase64(new Uint8Array(0))).toBe("");
@@ -70,18 +92,24 @@ describe("email worker", () => {
     vi.restoreAllMocks();
   });
 
-  it("rejects when local-part is missing", async () => {
+  it("silently drops when local-part is missing", async () => {
     const msg = makeMessage({ to: "@notify.ippoan.org" });
     await worker.email(msg, makeEnv(), {} as ExecutionContext);
-    expect(msg.setReject).toHaveBeenCalledWith("Missing local-part");
+    expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("rejects when KV has no key for tenant", async () => {
+  it("silently drops when host is not in ALLOWED_HOSTS", async () => {
+    const msg = makeMessage({ to: "tenant-acme@other.example.com" });
+    const env = makeEnv();
+    (env as any).ALLOWED_HOSTS = "notify.ippoan.org";
+    await worker.email(msg, env, {} as ExecutionContext);
+    expect(msg.setReject).not.toHaveBeenCalled();
+  });
+
+  it("silently drops when KV has no key for tenant", async () => {
     const msg = makeMessage();
     await worker.email(msg, makeEnv({ kvValue: null }), {} as ExecutionContext);
-    expect(msg.setReject).toHaveBeenCalledWith(
-      expect.stringContaining("Unknown tenant"),
-    );
+    expect(msg.setReject).not.toHaveBeenCalled();
   });
 
   it("rejects when MIME parse fails", async () => {
@@ -96,7 +124,7 @@ describe("email worker", () => {
     expect(msg.setReject).toHaveBeenCalledWith(expect.stringContaining("MIME parse failed"));
   });
 
-  it("rejects when no attachments are present", async () => {
+  it("silently drops when no attachments are present", async () => {
     const raw = new TextEncoder().encode(
       [
         "From: sender@example.com",
@@ -109,7 +137,7 @@ describe("email worker", () => {
     );
     const msg = makeMessage({ raw });
     await worker.email(msg, makeEnv(), {} as ExecutionContext);
-    expect(msg.setReject).toHaveBeenCalledWith("No attachments");
+    expect(msg.setReject).not.toHaveBeenCalled();
   });
 
   it("forwards parsed payload to ingest endpoint", async () => {

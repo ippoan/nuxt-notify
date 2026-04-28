@@ -3,6 +3,8 @@ import PostalMime from "postal-mime";
 export interface Env {
   INGEST_ENDPOINT: string;
   INGEST_KEYS_KV: KVNamespace;
+  /** カンマ区切り。未設定なら全 host 許可 (主にローカルテスト用) */
+  ALLOWED_HOSTS?: string;
 }
 
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
@@ -10,15 +12,23 @@ const MAX_ATTACHMENTS = 20;
 
 export default {
   async email(message: ForwardableEmailMessage, env: Env, _ctx: ExecutionContext): Promise<void> {
-    const localPart = message.to.split("@")[0]?.toLowerCase();
-    if (!localPart) {
-      message.setReject("Missing local-part");
+    const [localPartRaw, hostRaw] = message.to.split("@");
+    const localPart = localPartRaw?.toLowerCase();
+    const host = hostRaw?.toLowerCase();
+    if (!localPart || !host) {
+      // local-part / host が取れない不正アドレス → 黙ってドロップ
+      return;
+    }
+
+    // catch-all で zone 全体を受けるため、想定外 host は silent drop
+    if (!isHostAllowed(host, env.ALLOWED_HOSTS)) {
       return;
     }
 
     const ingestKey = await env.INGEST_KEYS_KV.get(localPart);
     if (!ingestKey) {
-      message.setReject(`Unknown tenant local-part: ${localPart}`);
+      // 未登録 local-part は silent drop (bounce すると From 偽装で
+      // 第三者にバウンスメールが届く可能性があるため)
       return;
     }
 
@@ -57,7 +67,7 @@ export default {
     }
 
     if (encoded.length === 0) {
-      message.setReject("No attachments");
+      // 添付なしのメールは silent drop (一覧 UI に出さない)
       return;
     }
 
@@ -92,6 +102,12 @@ export default {
     }
   },
 };
+
+export function isHostAllowed(host: string, allowedHosts?: string): boolean {
+  if (!allowedHosts) return true;
+  const list = allowedHosts.split(",").map(h => h.trim().toLowerCase()).filter(Boolean);
+  return list.includes(host.toLowerCase());
+}
 
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
   let binary = "";
