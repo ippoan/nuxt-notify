@@ -29,6 +29,10 @@ jobs:
       install_command: 'npm ci'
       typecheck_command: 'npx tsc --noEmit'
       test_command: 'npx vitest run'
+      # deploy_*_script を明示指定して --config wrangler.toml を必ず読ませる。
+      # 直前に pwd / ls をログに出して CWD と config 解決を可視化。
+      deploy_staging_script: 'pwd && ls && npx wrangler deploy --env staging --config wrangler.toml'
+      deploy_release_script: 'pwd && ls && npx wrangler deploy --config wrangler.toml'
       has_integration: false
       has_tests: true
       has_deploy: true
