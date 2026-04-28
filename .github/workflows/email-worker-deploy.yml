@@ -1,0 +1,48 @@
+name: Deploy Email Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/email-receiver/**'
+      - '.github/workflows/email-worker-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ['', 'staging']
+    name: Deploy ${{ matrix.env || 'production' }}
+    defaults:
+      run:
+        working-directory: workers/email-receiver
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: workers/email-receiver/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Deploy (${{ matrix.env || 'production' }})
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: workers/email-receiver
+          command: deploy ${{ matrix.env && format('--env {0}', matrix.env) || '' }}
