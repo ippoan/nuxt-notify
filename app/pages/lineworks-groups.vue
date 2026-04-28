@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const { apiFetch } = useApi()
 const config = useRuntimeConfig()
-const apiBase = config.public.apiBase as string
+const authWorkerUrl = config.public.authWorkerUrl as string
 
 interface LineworksChannel {
   id: string
@@ -83,7 +83,9 @@ function formatDate(iso: string): string {
 }
 
 function webhookUrl(botId: string): string {
-  return `${apiBase}/api/notify/lineworks/webhook/${botId}`
+  // LINE WORKS callback は auth-worker (Cloudflare Workers) で受ける。
+  // edge で HMAC 検証 + Durable Object に enqueue → backend へ転送する。
+  return `${authWorkerUrl}/lineworks/webhook/${botId}`
 }
 
 async function copyText(text: string) {
