@@ -46,16 +46,20 @@ export function pickRoute(host: string, env: Env): RouteTarget | null {
 }
 
 /**
- * `tenant-{slug}` 形式の local-part から slug を抜き出す。
- * - `tenant-acme` → `acme`
- * - `tenant-` (空 slug) → null
- * - `acme` (プレフィクス無し) → null
+ * `tenant-{short_id}` 形式の local-part から `tenants.short_id` (8 文字 hex) を抜き出す。
+ * - `tenant-1925a8e1` → `1925a8e1`
+ * - `tenant-` (空) → null
+ * - `1925a8e1` (プレフィクス無し) → null
+ *
+ * 形式が変でも backend が `tenants.short_id = $1` で 0 件にすれば silent drop に
+ * なるので、ここでは長さの厳密チェックはしない (tenant-default 等の
+ * 旧 slug 形式も後方互換で受け付け、backend が見つけられなければ 404)。
  */
-export function extractTenantSlug(localPart: string): string | null {
+export function extractTenantShortId(localPart: string): string | null {
   const PREFIX = "tenant-";
   if (!localPart.startsWith(PREFIX)) return null;
-  const slug = localPart.slice(PREFIX.length).trim();
-  return slug.length > 0 ? slug : null;
+  const id = localPart.slice(PREFIX.length).trim();
+  return id.length > 0 ? id : null;
 }
 
 export default {
@@ -73,10 +77,10 @@ export default {
       return;
     }
 
-    // local-part `tenant-{slug}` から slug を抽出。バウンスは From 偽装
+    // local-part `tenant-{short_id}` から短縮 ID を抽出。バウンスは From 偽装
     // で第三者に送られうるので silent drop。
-    const tenantSlug = extractTenantSlug(localPart);
-    if (!tenantSlug) {
+    const tenantShortId = extractTenantShortId(localPart);
+    if (!tenantShortId) {
       return;
     }
 
@@ -119,7 +123,7 @@ export default {
     }
 
     const payload = {
-      tenant_slug: tenantSlug,
+      tenant_short_id: tenantShortId,
       from: parsed.from?.address ?? null,
       subject: parsed.subject ?? null,
       body_text: parsed.text ?? null,

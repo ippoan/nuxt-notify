@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import worker, { extractTenantSlug, pickRoute, uint8ArrayToBase64 } from "../src/index";
+import worker, { extractTenantShortId, pickRoute, uint8ArrayToBase64 } from "../src/index";
 
 function makeMessage(overrides: Partial<{
   to: string;
@@ -49,21 +49,23 @@ function makeEnv(overrides: {
   };
 }
 
-describe("extractTenantSlug", () => {
-  it("extracts slug from valid local-part", () => {
-    expect(extractTenantSlug("tenant-acme")).toBe("acme");
-    expect(extractTenantSlug("tenant-some-long-slug")).toBe("some-long-slug");
+describe("extractTenantShortId", () => {
+  it("extracts short_id from valid local-part", () => {
+    expect(extractTenantShortId("tenant-1925a8e1")).toBe("1925a8e1");
+    expect(extractTenantShortId("tenant-deadbeef")).toBe("deadbeef");
+    // 形式チェックは backend に任せるので、UUID 以外でも raw に通す
+    expect(extractTenantShortId("tenant-some-long-slug")).toBe("some-long-slug");
   });
 
-  it("returns null for empty slug", () => {
-    expect(extractTenantSlug("tenant-")).toBeNull();
-    expect(extractTenantSlug("tenant-   ")).toBeNull();
+  it("returns null for empty short_id", () => {
+    expect(extractTenantShortId("tenant-")).toBeNull();
+    expect(extractTenantShortId("tenant-   ")).toBeNull();
   });
 
   it("returns null without prefix", () => {
-    expect(extractTenantSlug("acme")).toBeNull();
-    expect(extractTenantSlug("info")).toBeNull();
-    expect(extractTenantSlug("")).toBeNull();
+    expect(extractTenantShortId("1925a8e1")).toBeNull();
+    expect(extractTenantShortId("info")).toBeNull();
+    expect(extractTenantShortId("")).toBeNull();
   });
 });
 
@@ -203,12 +205,12 @@ describe("email worker", () => {
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("forwards prod email with tenant_slug + prod secret", async () => {
+  it("forwards prod email with tenant_short_id + prod secret", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 201 }));
 
-    const msg = makeMessage({ to: "tenant-acme@notify.ippoan.org" });
+    const msg = makeMessage({ to: "tenant-1925a8e1@notify.ippoan.org" });
     await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
 
     expect(msg.setReject).not.toHaveBeenCalled();
@@ -218,7 +220,7 @@ describe("email worker", () => {
       "X-Worker-Secret": "PROD_SECRET",
     });
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.tenant_slug).toBe("acme");
+    expect(body.tenant_short_id).toBe("1925a8e1");
     expect(body.attachments).toHaveLength(1);
     expect(body.from).toBe("sender@example.com");
   });

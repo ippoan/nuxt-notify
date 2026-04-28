@@ -200,7 +200,7 @@ async function remove() {
 }
 
 // ===== Email 受信設定 =====
-const tenantSlug = ref<string>('')
+const tenantShortId = ref<string>('')
 
 const ingestEmailDomain = computed(() => {
   // 本番判定: apiBase ホスト名から推定。Cloudflare Email Routing 側の設定と整合させる。
@@ -209,24 +209,23 @@ const ingestEmailDomain = computed(() => {
 })
 
 const ingestEmailAddress = computed(() => {
-  if (!tenantSlug.value) return ''
-  return `tenant-${tenantSlug.value}@${ingestEmailDomain.value}`
+  if (!tenantShortId.value) return ''
+  return `tenant-${tenantShortId.value}@${ingestEmailDomain.value}`
 })
 
-async function loadTenantSlug() {
+async function loadTenantShortId() {
   try {
-    // /auth/me は flat な tenant_slug を返す (rust-alc-api#295)
-    const me = await apiFetch<{ tenant_slug?: string }>('/auth/me')
-    tenantSlug.value = me?.tenant_slug ?? ''
+    // /auth/me は tenant_short_id (8 文字 hex、NOT NULL) を返す (rust-alc-api#296)
+    const me = await apiFetch<{ tenant_short_id?: string }>('/auth/me')
+    tenantShortId.value = me?.tenant_short_id ?? ''
   } catch {
-    // /auth/me が呼べないテナントは tenant_id をフォールバック表示 (アドレス組み立てには使えないが UI 上の表示崩れを防ぐ)
-    tenantSlug.value = orgId.value ?? ''
+    tenantShortId.value = ''
   }
 }
 
 onMounted(async () => {
   await load()
-  await loadTenantSlug()
+  await loadTenantShortId()
 })
 </script>
 
