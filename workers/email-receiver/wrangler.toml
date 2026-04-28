@@ -4,24 +4,41 @@ compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "24b45709d060d957340180e995f0d373"
 
-# 本番: notify.ippoan.org に届いたメールを受ける
+# 本番 Worker は zone catch-all で *@ippoan.org を全て受け、host で分岐:
+#   tenant-{slug}@notify.ippoan.org         → INGEST_KEYS_KV (prod) + INGEST_ENDPOINT
+#   tenant-{slug}@notify-staging.ippoan.org → INGEST_KEYS_KV_STAGING + INGEST_ENDPOINT_STAGING
+# それ以外の host (例: random@ippoan.org) は silent drop。
+
 [vars]
 INGEST_ENDPOINT = "https://alc-api.ippoan.org/api/notify/ingest"
-ALLOWED_HOSTS = "notify.ippoan.org"
+INGEST_ENDPOINT_STAGING = "https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/notify/ingest"
+PROD_HOST = "notify.ippoan.org"
+STAGING_HOST = "notify-staging.ippoan.org"
 
 # テナントごとの ingest_key を保持 (key=local-part, value=plaintext key)
-# 例: tenant-acme@notify.ippoan.org → KV.get("tenant-acme") → ingest_key
 [[kv_namespaces]]
 binding = "INGEST_KEYS_KV"
 id = "3339456a3c0343c99e6114dcf9f70efb"
 
+[[kv_namespaces]]
+binding = "INGEST_KEYS_KV_STAGING"
+id = "7f1e4c04825148df9d4b9443ccee43c8"
+
+# staging Worker (notify-email-receiver-staging) は CI 都合で deploy はされるが
+# Email Routing の catch-all は1つしか持てないので実質受信しない。
+# 手元 wrangler dev / canary 用途のみ想定。
 [env.staging]
 name = "notify-email-receiver-staging"
 
 [env.staging.vars]
 INGEST_ENDPOINT = "https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/notify/ingest"
-ALLOWED_HOSTS = "notify-staging.ippoan.org"
+PROD_HOST = "notify-staging.ippoan.org"
+STAGING_HOST = "notify-staging.ippoan.org"
 
 [[env.staging.kv_namespaces]]
 binding = "INGEST_KEYS_KV"
+id = "7f1e4c04825148df9d4b9443ccee43c8"
+
+[[env.staging.kv_namespaces]]
+binding = "INGEST_KEYS_KV_STAGING"
 id = "7f1e4c04825148df9d4b9443ccee43c8"

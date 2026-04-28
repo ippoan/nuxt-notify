@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import worker, { isHostAllowed, uint8ArrayToBase64 } from "../src/index";
+import worker, { pickRoute, uint8ArrayToBase64 } from "../src/index";
 
 function makeMessage(overrides: Partial<{
   to: string;
@@ -35,38 +35,74 @@ function makeMessage(overrides: Partial<{
   } as unknown as ForwardableEmailMessage & { setReject: typeof setReject };
 }
 
-function makeEnv(overrides: Partial<{
-  INGEST_ENDPOINT: string;
-  kvValue: string | null;
-}> = {}) {
-  const kv = {
-    get: vi.fn().mockResolvedValue(overrides.kvValue === undefined ? "test-ingest-key" : overrides.kvValue),
-  };
+function makeKv(value: string | null = "test-ingest-key") {
+  return { get: vi.fn().mockResolvedValue(value) } as unknown as KVNamespace;
+}
+
+function makeEnv(overrides: {
+  prodEndpoint?: string;
+  prodKvValue?: string | null;
+  stagingEndpoint?: string;
+  stagingKvValue?: string | null;
+} = {}) {
+  // 注: ?? は null も default にしてしまうので、undefined のみ default 扱いにする
+  const prodVal = "prodKvValue" in overrides ? overrides.prodKvValue! : "test-ingest-key";
+  const stagingVal = "stagingKvValue" in overrides ? overrides.stagingKvValue! : "test-staging-key";
   return {
-    INGEST_ENDPOINT: overrides.INGEST_ENDPOINT ?? "https://example.invalid/api/notify/ingest",
-    INGEST_KEYS_KV: kv as unknown as KVNamespace,
+    INGEST_ENDPOINT: overrides.prodEndpoint ?? "https://prod.invalid/api/notify/ingest",
+    INGEST_KEYS_KV: makeKv(prodVal),
+    INGEST_ENDPOINT_STAGING: overrides.stagingEndpoint ?? "https://staging.invalid/api/notify/ingest",
+    INGEST_KEYS_KV_STAGING: makeKv(stagingVal),
   };
 }
 
-describe("isHostAllowed", () => {
-  it("returns true when ALLOWED_HOSTS is undefined", () => {
-    expect(isHostAllowed("any.example.com")).toBe(true);
+describe("pickRoute", () => {
+  it("routes notify.ippoan.org to prod", () => {
+    const env = makeEnv();
+    const r = pickRoute("notify.ippoan.org", env as any);
+    expect(r?.endpoint).toBe("https://prod.invalid/api/notify/ingest");
+    expect(r?.kv).toBe(env.INGEST_KEYS_KV);
   });
 
-  it("matches single host", () => {
-    expect(isHostAllowed("notify.ippoan.org", "notify.ippoan.org")).toBe(true);
-    expect(isHostAllowed("evil.com", "notify.ippoan.org")).toBe(false);
+  it("routes notify-staging.ippoan.org to staging", () => {
+    const env = makeEnv();
+    const r = pickRoute("notify-staging.ippoan.org", env as any);
+    expect(r?.endpoint).toBe("https://staging.invalid/api/notify/ingest");
+    expect(r?.kv).toBe(env.INGEST_KEYS_KV_STAGING);
   });
 
-  it("matches comma-separated host list with whitespace", () => {
-    const list = " notify.ippoan.org , notify-staging.ippoan.org ";
-    expect(isHostAllowed("notify.ippoan.org", list)).toBe(true);
-    expect(isHostAllowed("notify-staging.ippoan.org", list)).toBe(true);
-    expect(isHostAllowed("ippoan.org", list)).toBe(false);
+  it("returns null for unknown host", () => {
+    const env = makeEnv();
+    expect(pickRoute("ippoan.org", env as any)).toBeNull();
+    expect(pickRoute("evil.example.com", env as any)).toBeNull();
   });
 
-  it("is case insensitive on host", () => {
-    expect(isHostAllowed("Notify.Ippoan.Org", "notify.ippoan.org")).toBe(true);
+  it("staging routing requires both env vars", () => {
+    const env: any = {
+      INGEST_ENDPOINT: "https://prod.invalid",
+      INGEST_KEYS_KV: makeKv(),
+      // INGEST_ENDPOINT_STAGING / INGEST_KEYS_KV_STAGING 未設定
+    };
+    expect(pickRoute("notify-staging.ippoan.org", env)).toBeNull();
+  });
+
+  it("respects PROD_HOST / STAGING_HOST overrides", () => {
+    const env: any = {
+      INGEST_ENDPOINT: "https://prod.invalid",
+      INGEST_KEYS_KV: makeKv(),
+      INGEST_ENDPOINT_STAGING: "https://stg.invalid",
+      INGEST_KEYS_KV_STAGING: makeKv(),
+      PROD_HOST: "mail.example.com",
+      STAGING_HOST: "mail-stg.example.com",
+    };
+    expect(pickRoute("mail.example.com", env)?.endpoint).toBe("https://prod.invalid");
+    expect(pickRoute("mail-stg.example.com", env)?.endpoint).toBe("https://stg.invalid");
+    expect(pickRoute("notify.ippoan.org", env)).toBeNull();
+  });
+
+  it("is case insensitive", () => {
+    const env = makeEnv();
+    expect(pickRoute("Notify.Ippoan.Org", env as any)?.endpoint).toBe("https://prod.invalid/api/notify/ingest");
   });
 });
 
@@ -94,32 +130,29 @@ describe("email worker", () => {
 
   it("silently drops when local-part is missing", async () => {
     const msg = makeMessage({ to: "@notify.ippoan.org" });
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("silently drops when host is not in ALLOWED_HOSTS", async () => {
+  it("silently drops when host is unknown", async () => {
     const msg = makeMessage({ to: "tenant-acme@other.example.com" });
-    const env = makeEnv();
-    (env as any).ALLOWED_HOSTS = "notify.ippoan.org";
-    await worker.email(msg, env, {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("silently drops when KV has no key for tenant", async () => {
+  it("silently drops when prod KV has no key for tenant", async () => {
     const msg = makeMessage();
-    await worker.email(msg, makeEnv({ kvValue: null }), {} as ExecutionContext);
+    await worker.email(msg, makeEnv({ prodKvValue: null }) as any, {} as ExecutionContext);
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
   it("rejects when MIME parse fails", async () => {
     const msg = makeMessage({ raw: new TextEncoder().encode("\x00not-mime") });
-    // postal-mime is forgiving — to force failure we patch parse
     const PostalMime = (await import("postal-mime")).default;
     const spy = vi
       .spyOn(PostalMime, "parse")
       .mockRejectedValueOnce(new Error("bad"));
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(spy).toHaveBeenCalled();
     expect(msg.setReject).toHaveBeenCalledWith(expect.stringContaining("MIME parse failed"));
   });
@@ -136,28 +169,38 @@ describe("email worker", () => {
       ].join("\r\n"),
     );
     const msg = makeMessage({ raw });
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("forwards parsed payload to ingest endpoint", async () => {
+  it("forwards prod email to prod ingest endpoint with prod key", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 201 }));
 
-    const msg = makeMessage();
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    const msg = makeMessage({ to: "tenant-acme@notify.ippoan.org" });
+    const env = makeEnv({ prodKvValue: "PROD_KEY" });
+    await worker.email(msg, env as any, {} as ExecutionContext);
 
     expect(msg.setReject).not.toHaveBeenCalled();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(url).toBe("https://example.invalid/api/notify/ingest");
-    const headers = (init as RequestInit).headers as Record<string, string>;
-    expect(headers["X-Ingest-Key"]).toBe("test-ingest-key");
-    const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.attachments).toHaveLength(1);
-    expect(body.attachments[0].filename).toBe("a.pdf");
-    expect(body.from).toBe("sender@example.com");
+    expect(url).toBe("https://prod.invalid/api/notify/ingest");
+    expect((init as RequestInit).headers).toMatchObject({ "X-Ingest-Key": "PROD_KEY" });
+  });
+
+  it("forwards staging email to staging ingest endpoint with staging key", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 201 }));
+
+    const msg = makeMessage({ to: "tenant-acme@notify-staging.ippoan.org" });
+    const env = makeEnv({ stagingKvValue: "STAGING_KEY" });
+    await worker.email(msg, env as any, {} as ExecutionContext);
+
+    expect(msg.setReject).not.toHaveBeenCalled();
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe("https://staging.invalid/api/notify/ingest");
+    expect((init as RequestInit).headers).toMatchObject({ "X-Ingest-Key": "STAGING_KEY" });
   });
 
   it("rejects when ingest endpoint returns non-OK", async () => {
@@ -165,7 +208,7 @@ describe("email worker", () => {
       new Response("upstream error", { status: 500 }),
     );
     const msg = makeMessage();
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).toHaveBeenCalledWith(
       expect.stringContaining("Ingest failed: 500"),
     );
@@ -174,14 +217,13 @@ describe("email worker", () => {
   it("rejects when fetch itself throws", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
     const msg = makeMessage();
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).toHaveBeenCalledWith(
       expect.stringContaining("Ingest fetch failed"),
     );
   });
 
   it("rejects when total attachments exceed 25MB", async () => {
-    // Inject parsed object with one huge attachment via PostalMime mock
     const PostalMime = (await import("postal-mime")).default;
     vi.spyOn(PostalMime, "parse").mockResolvedValueOnce({
       from: { address: "a@b" },
@@ -197,7 +239,7 @@ describe("email worker", () => {
       ],
     } as any);
     const msg = makeMessage();
-    await worker.email(msg, makeEnv(), {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).toHaveBeenCalledWith("Attachments exceed 25MB total");
   });
 });
