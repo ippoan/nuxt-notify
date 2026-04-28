@@ -199,7 +199,90 @@ async function remove() {
   }
 }
 
-onMounted(load)
+// ===== Email 受信設定 (ingest keys) =====
+interface IngestKey {
+  id: string
+  name: string
+  enabled: boolean
+  created_at: string
+}
+const ingestKeys = ref<IngestKey[]>([])
+const ingestKeysLoading = ref(false)
+const newKeyName = ref('')
+const newPlaintextKey = ref<{ id: string; name: string; key: string } | null>(null)
+
+const ingestEmailDomain = computed(() => {
+  // 本番判定: apiBase ホスト名から推定。最終的には API/Cloudflare 設定と整合させる必要あり。
+  if (apiBase.includes('alc-api.ippoan.org')) return 'notify.ippoan.org'
+  return 'notify-staging.ippoan.org'
+})
+
+const tenantSlug = ref<string>('')
+const ingestEmailAddress = computed(() => {
+  if (!tenantSlug.value) return ''
+  return `tenant-${tenantSlug.value}@${ingestEmailDomain.value}`
+})
+
+async function loadIngestKeys() {
+  ingestKeysLoading.value = true
+  try {
+    ingestKeys.value = await apiFetch<IngestKey[]>('/notify/ingest-keys')
+  } catch (e: any) {
+    error.value = 'ingest_keys 取得失敗: ' + (e.message || String(e))
+  } finally {
+    ingestKeysLoading.value = false
+  }
+}
+
+async function loadTenantSlug() {
+  try {
+    const me = await apiFetch<{ tenant?: { slug?: string } }>('/auth/me')
+    tenantSlug.value = me?.tenant?.slug ?? ''
+  } catch {
+    // /auth/me が無いテナントは tenantId をそのまま使う
+    tenantSlug.value = orgId.value ?? ''
+  }
+}
+
+async function createIngestKey() {
+  if (!newKeyName.value.trim()) return
+  try {
+    const res = await apiFetch<{ id: string; name: string; key: string }>(
+      '/notify/ingest-keys',
+      { method: 'POST', body: JSON.stringify({ name: newKeyName.value.trim() }) },
+    )
+    newPlaintextKey.value = { id: res.id, name: res.name, key: res.key }
+    newKeyName.value = ''
+    await loadIngestKeys()
+  } catch (e: any) {
+    error.value = 'ingest_key 発行失敗: ' + (e.message || String(e))
+  }
+}
+
+async function deleteIngestKey(k: IngestKey) {
+  if (!confirm(`ingest_key "${k.name}" を削除しますか?`)) return
+  try {
+    await apiFetch(`/notify/ingest-keys/${k.id}`, { method: 'DELETE' })
+    await loadIngestKeys()
+  } catch (e: any) {
+    error.value = 'ingest_key 削除失敗: ' + (e.message || String(e))
+  }
+}
+
+async function copyIngestKey(text: string) {
+  await navigator.clipboard.writeText(text)
+  success.value = 'コピーしました'
+}
+
+function dismissPlaintextKey() {
+  newPlaintextKey.value = null
+}
+
+onMounted(async () => {
+  await load()
+  await loadTenantSlug()
+  await loadIngestKeys()
+})
 </script>
 
 <template>
@@ -383,6 +466,92 @@ onMounted(load)
             コピー
           </button>
         </div>
+      </div>
+
+      <!-- ===== Email 受信設定 ===== -->
+      <div class="bg-white rounded-lg shadow border p-4 mt-8">
+        <h3 class="font-medium mb-3">Email 受信設定</h3>
+        <p class="text-sm text-gray-500 mb-3">
+          外部からメール経由で添付ファイルを受け取り、自動で「受信メール」一覧に追加します。
+        </p>
+
+        <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-4">
+          <div class="text-xs text-blue-700 mb-1">受信用メールアドレス</div>
+          <code class="text-sm font-mono select-all">{{ ingestEmailAddress || '(テナント情報取得中...)' }}</code>
+          <p class="text-xs text-blue-600 mt-1">
+            このアドレス宛に PDF 等を添付してメール送信すると、テナントに紐づいて取り込まれます。
+          </p>
+        </div>
+
+        <!-- 新規発行 -->
+        <div class="border rounded p-3 mb-3">
+          <div class="text-sm font-medium mb-2">新しい ingest key を発行</div>
+          <div class="flex gap-2">
+            <input v-model="newKeyName" placeholder="名前 (例: production)"
+                   class="flex-1 border rounded px-3 py-2 text-sm" />
+            <button @click="createIngestKey" :disabled="!newKeyName.trim()"
+                    class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+              発行
+            </button>
+          </div>
+        </div>
+
+        <!-- 発行直後の plaintext 表示 (1回のみ) -->
+        <div v-if="newPlaintextKey" class="border-2 border-yellow-300 bg-yellow-50 rounded p-3 mb-3">
+          <div class="text-sm font-medium text-yellow-800 mb-2">
+            ⚠️ ingest_key を発行しました — このキーは二度と表示されません
+          </div>
+          <div class="text-xs mb-1">名前: {{ newPlaintextKey.name }}</div>
+          <input :value="newPlaintextKey.key" readonly
+                 class="w-full border rounded px-3 py-2 text-xs font-mono bg-white mb-2 select-all" />
+          <div class="flex gap-2">
+            <button @click="copyIngestKey(newPlaintextKey.key)"
+                    class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">
+              コピー
+            </button>
+            <button @click="dismissPlaintextKey"
+                    class="bg-gray-300 px-3 py-1 rounded text-xs hover:bg-gray-400">
+              閉じる
+            </button>
+          </div>
+          <p class="text-xs text-yellow-700 mt-2">
+            このキーを Cloudflare Workers の <code>INGEST_KEYS_KV</code> に
+            <code>tenant-{slug}</code> = この値 で登録すると、メール経由の受信が有効になります。
+          </p>
+        </div>
+
+        <!-- 一覧 -->
+        <div class="text-sm font-medium mb-2">発行済み ingest key</div>
+        <div v-if="ingestKeysLoading" class="text-xs text-gray-500">読み込み中...</div>
+        <div v-else-if="ingestKeys.length === 0" class="text-xs text-gray-500">
+          まだ発行されていません。
+        </div>
+        <table v-else class="w-full text-sm">
+          <thead class="text-left text-xs text-gray-500">
+            <tr>
+              <th class="py-1">名前</th>
+              <th class="py-1">作成日</th>
+              <th class="py-1">状態</th>
+              <th class="py-1"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
+            <tr v-for="k in ingestKeys" :key="k.id">
+              <td class="py-1">{{ k.name }}</td>
+              <td class="py-1 text-gray-500">{{ new Date(k.created_at).toLocaleDateString('ja-JP') }}</td>
+              <td class="py-1">
+                <span class="text-xs px-2 py-0.5 rounded"
+                      :class="k.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'">
+                  {{ k.enabled ? '有効' : '無効' }}
+                </span>
+              </td>
+              <td class="py-1 text-right">
+                <button @click="deleteIngestKey(k)"
+                        class="text-xs text-red-600 hover:underline">削除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- メッセージ -->
