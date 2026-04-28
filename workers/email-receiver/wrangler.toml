@@ -4,6 +4,12 @@ compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "24b45709d060d957340180e995f0d373"
 
+# Worker のリクエスト/イベントログを Cloudflare Dashboard の Observability タブに保存。
+# silent drop が多い Email Worker ではログが無いと挙動が見えないため必須。
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
 # 本番 Worker は zone catch-all で *@ippoan.org を全て受け、host で分岐:
 #   tenant-{slug}@notify.ippoan.org         → INGEST_ENDPOINT + NOTIFY_WORKER_SECRET (prod)
 #   tenant-{slug}@notify-staging.ippoan.org → INGEST_ENDPOINT_STAGING + NOTIFY_WORKER_SECRET_STAGING
