@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    exclude: ['**/node_modules/**', '**/dist/**', 'workers/**'],
     coverage: {
       provider: 'v8',
       include: ['app/composables/**/*.ts', 'app/utils/**/*.ts'],
