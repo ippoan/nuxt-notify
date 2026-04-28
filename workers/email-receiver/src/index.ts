@@ -3,13 +3,13 @@ import PostalMime from "postal-mime";
 export interface Env {
   /** 本番 ingest エンドポイント (notify.ippoan.org 用) */
   INGEST_ENDPOINT: string;
-  /** 本番 KV namespace (tenant-{slug} → plaintext ingest_key) */
-  INGEST_KEYS_KV: KVNamespace;
+  /** 本番 backend と共有する shared secret (wrangler secret put NOTIFY_WORKER_SECRET) */
+  NOTIFY_WORKER_SECRET: string;
 
   /** staging ingest エンドポイント (notify-staging.ippoan.org 用、任意) */
   INGEST_ENDPOINT_STAGING?: string;
-  /** staging KV namespace (任意) */
-  INGEST_KEYS_KV_STAGING?: KVNamespace;
+  /** staging backend と共有する shared secret (任意、staging host を受ける時のみ必要) */
+  NOTIFY_WORKER_SECRET_STAGING?: string;
 
   /** 本番ホスト名 (デフォルト notify.ippoan.org) */
   PROD_HOST?: string;
@@ -22,20 +22,40 @@ const MAX_ATTACHMENTS = 20;
 
 interface RouteTarget {
   endpoint: string;
-  kv: KVNamespace;
+  secret: string;
 }
 
 export function pickRoute(host: string, env: Env): RouteTarget | null {
   const prodHost = (env.PROD_HOST ?? "notify.ippoan.org").toLowerCase();
   const stagingHost = (env.STAGING_HOST ?? "notify-staging.ippoan.org").toLowerCase();
   const h = host.toLowerCase();
-  if (h === prodHost) {
-    return { endpoint: env.INGEST_ENDPOINT, kv: env.INGEST_KEYS_KV };
+  if (h === prodHost && env.INGEST_ENDPOINT && env.NOTIFY_WORKER_SECRET) {
+    return { endpoint: env.INGEST_ENDPOINT, secret: env.NOTIFY_WORKER_SECRET };
   }
-  if (h === stagingHost && env.INGEST_ENDPOINT_STAGING && env.INGEST_KEYS_KV_STAGING) {
-    return { endpoint: env.INGEST_ENDPOINT_STAGING, kv: env.INGEST_KEYS_KV_STAGING };
+  if (
+    h === stagingHost &&
+    env.INGEST_ENDPOINT_STAGING &&
+    env.NOTIFY_WORKER_SECRET_STAGING
+  ) {
+    return {
+      endpoint: env.INGEST_ENDPOINT_STAGING,
+      secret: env.NOTIFY_WORKER_SECRET_STAGING,
+    };
   }
   return null;
+}
+
+/**
+ * `tenant-{slug}` 形式の local-part から slug を抜き出す。
+ * - `tenant-acme` → `acme`
+ * - `tenant-` (空 slug) → null
+ * - `acme` (プレフィクス無し) → null
+ */
+export function extractTenantSlug(localPart: string): string | null {
+  const PREFIX = "tenant-";
+  if (!localPart.startsWith(PREFIX)) return null;
+  const slug = localPart.slice(PREFIX.length).trim();
+  return slug.length > 0 ? slug : null;
 }
 
 export default {
@@ -47,14 +67,16 @@ export default {
       return;
     }
 
-    // host → (endpoint, KV) を選択。未対応 host は silent drop。
+    // host → (endpoint, secret) を選択。未対応 host は silent drop。
     const route = pickRoute(host, env);
     if (!route) {
       return;
     }
 
-    const ingestKey = await route.kv.get(localPart);
-    if (!ingestKey) {
+    // local-part `tenant-{slug}` から slug を抽出。バウンスは From 偽装
+    // で第三者に送られうるので silent drop。
+    const tenantSlug = extractTenantSlug(localPart);
+    if (!tenantSlug) {
       return;
     }
 
@@ -97,6 +119,7 @@ export default {
     }
 
     const payload = {
+      tenant_slug: tenantSlug,
       from: parsed.from?.address ?? null,
       subject: parsed.subject ?? null,
       body_text: parsed.text ?? null,
@@ -111,7 +134,7 @@ export default {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Ingest-Key": ingestKey,
+          "X-Worker-Secret": route.secret,
         },
         body: JSON.stringify(payload),
       });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import worker, { pickRoute, uint8ArrayToBase64 } from "../src/index";
+import worker, { extractTenantSlug, pickRoute, uint8ArrayToBase64 } from "../src/index";
 
 function makeMessage(overrides: Partial<{
   to: string;
@@ -35,40 +35,51 @@ function makeMessage(overrides: Partial<{
   } as unknown as ForwardableEmailMessage & { setReject: typeof setReject };
 }
 
-function makeKv(value: string | null = "test-ingest-key") {
-  return { get: vi.fn().mockResolvedValue(value) } as unknown as KVNamespace;
-}
-
 function makeEnv(overrides: {
   prodEndpoint?: string;
-  prodKvValue?: string | null;
+  prodSecret?: string;
   stagingEndpoint?: string;
-  stagingKvValue?: string | null;
+  stagingSecret?: string;
 } = {}) {
-  // 注: ?? は null も default にしてしまうので、undefined のみ default 扱いにする
-  const prodVal = "prodKvValue" in overrides ? overrides.prodKvValue! : "test-ingest-key";
-  const stagingVal = "stagingKvValue" in overrides ? overrides.stagingKvValue! : "test-staging-key";
   return {
     INGEST_ENDPOINT: overrides.prodEndpoint ?? "https://prod.invalid/api/notify/ingest",
-    INGEST_KEYS_KV: makeKv(prodVal),
+    NOTIFY_WORKER_SECRET: overrides.prodSecret ?? "PROD_SECRET",
     INGEST_ENDPOINT_STAGING: overrides.stagingEndpoint ?? "https://staging.invalid/api/notify/ingest",
-    INGEST_KEYS_KV_STAGING: makeKv(stagingVal),
+    NOTIFY_WORKER_SECRET_STAGING: overrides.stagingSecret ?? "STAGING_SECRET",
   };
 }
+
+describe("extractTenantSlug", () => {
+  it("extracts slug from valid local-part", () => {
+    expect(extractTenantSlug("tenant-acme")).toBe("acme");
+    expect(extractTenantSlug("tenant-some-long-slug")).toBe("some-long-slug");
+  });
+
+  it("returns null for empty slug", () => {
+    expect(extractTenantSlug("tenant-")).toBeNull();
+    expect(extractTenantSlug("tenant-   ")).toBeNull();
+  });
+
+  it("returns null without prefix", () => {
+    expect(extractTenantSlug("acme")).toBeNull();
+    expect(extractTenantSlug("info")).toBeNull();
+    expect(extractTenantSlug("")).toBeNull();
+  });
+});
 
 describe("pickRoute", () => {
   it("routes notify.ippoan.org to prod", () => {
     const env = makeEnv();
     const r = pickRoute("notify.ippoan.org", env as any);
     expect(r?.endpoint).toBe("https://prod.invalid/api/notify/ingest");
-    expect(r?.kv).toBe(env.INGEST_KEYS_KV);
+    expect(r?.secret).toBe("PROD_SECRET");
   });
 
   it("routes notify-staging.ippoan.org to staging", () => {
     const env = makeEnv();
     const r = pickRoute("notify-staging.ippoan.org", env as any);
     expect(r?.endpoint).toBe("https://staging.invalid/api/notify/ingest");
-    expect(r?.kv).toBe(env.INGEST_KEYS_KV_STAGING);
+    expect(r?.secret).toBe("STAGING_SECRET");
   });
 
   it("returns null for unknown host", () => {
@@ -77,11 +88,24 @@ describe("pickRoute", () => {
     expect(pickRoute("evil.example.com", env as any)).toBeNull();
   });
 
-  it("staging routing requires both env vars", () => {
+  it("prod routing requires both endpoint and secret", () => {
+    const env: any = {
+      INGEST_ENDPOINT: "",
+      NOTIFY_WORKER_SECRET: "x",
+    };
+    expect(pickRoute("notify.ippoan.org", env)).toBeNull();
+    const env2: any = {
+      INGEST_ENDPOINT: "https://prod.invalid",
+      NOTIFY_WORKER_SECRET: "",
+    };
+    expect(pickRoute("notify.ippoan.org", env2)).toBeNull();
+  });
+
+  it("staging routing requires both endpoint and secret", () => {
     const env: any = {
       INGEST_ENDPOINT: "https://prod.invalid",
-      INGEST_KEYS_KV: makeKv(),
-      // INGEST_ENDPOINT_STAGING / INGEST_KEYS_KV_STAGING 未設定
+      NOTIFY_WORKER_SECRET: "x",
+      // INGEST_ENDPOINT_STAGING / NOTIFY_WORKER_SECRET_STAGING 未設定
     };
     expect(pickRoute("notify-staging.ippoan.org", env)).toBeNull();
   });
@@ -89,9 +113,9 @@ describe("pickRoute", () => {
   it("respects PROD_HOST / STAGING_HOST overrides", () => {
     const env: any = {
       INGEST_ENDPOINT: "https://prod.invalid",
-      INGEST_KEYS_KV: makeKv(),
+      NOTIFY_WORKER_SECRET: "p",
       INGEST_ENDPOINT_STAGING: "https://stg.invalid",
-      INGEST_KEYS_KV_STAGING: makeKv(),
+      NOTIFY_WORKER_SECRET_STAGING: "s",
       PROD_HOST: "mail.example.com",
       STAGING_HOST: "mail-stg.example.com",
     };
@@ -140,9 +164,15 @@ describe("email worker", () => {
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("silently drops when prod KV has no key for tenant", async () => {
-    const msg = makeMessage();
-    await worker.email(msg, makeEnv({ prodKvValue: null }) as any, {} as ExecutionContext);
+  it("silently drops when local-part lacks tenant- prefix", async () => {
+    const msg = makeMessage({ to: "info@notify.ippoan.org" });
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
+    expect(msg.setReject).not.toHaveBeenCalled();
+  });
+
+  it("silently drops when local-part is just the prefix with empty slug", async () => {
+    const msg = makeMessage({ to: "tenant-@notify.ippoan.org" });
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
@@ -173,34 +203,40 @@ describe("email worker", () => {
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("forwards prod email to prod ingest endpoint with prod key", async () => {
+  it("forwards prod email with tenant_slug + prod secret", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 201 }));
 
     const msg = makeMessage({ to: "tenant-acme@notify.ippoan.org" });
-    const env = makeEnv({ prodKvValue: "PROD_KEY" });
-    await worker.email(msg, env as any, {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
 
     expect(msg.setReject).not.toHaveBeenCalled();
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(url).toBe("https://prod.invalid/api/notify/ingest");
-    expect((init as RequestInit).headers).toMatchObject({ "X-Ingest-Key": "PROD_KEY" });
+    expect((init as RequestInit).headers).toMatchObject({
+      "X-Worker-Secret": "PROD_SECRET",
+    });
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.tenant_slug).toBe("acme");
+    expect(body.attachments).toHaveLength(1);
+    expect(body.from).toBe("sender@example.com");
   });
 
-  it("forwards staging email to staging ingest endpoint with staging key", async () => {
+  it("forwards staging email with staging secret", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 201 }));
 
     const msg = makeMessage({ to: "tenant-acme@notify-staging.ippoan.org" });
-    const env = makeEnv({ stagingKvValue: "STAGING_KEY" });
-    await worker.email(msg, env as any, {} as ExecutionContext);
+    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
 
     expect(msg.setReject).not.toHaveBeenCalled();
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(url).toBe("https://staging.invalid/api/notify/ingest");
-    expect((init as RequestInit).headers).toMatchObject({ "X-Ingest-Key": "STAGING_KEY" });
+    expect((init as RequestInit).headers).toMatchObject({
+      "X-Worker-Secret": "STAGING_SECRET",
+    });
   });
 
   it("rejects when ingest endpoint returns non-OK", async () => {

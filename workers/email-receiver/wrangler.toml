@@ -5,24 +5,22 @@ compatibility_flags = ["nodejs_compat"]
 account_id = "24b45709d060d957340180e995f0d373"
 
 # 本番 Worker は zone catch-all で *@ippoan.org を全て受け、host で分岐:
-#   tenant-{slug}@notify.ippoan.org         → INGEST_KEYS_KV (prod) + INGEST_ENDPOINT
-#   tenant-{slug}@notify-staging.ippoan.org → INGEST_KEYS_KV_STAGING + INGEST_ENDPOINT_STAGING
-# それ以外の host (例: random@ippoan.org) は silent drop。
+#   tenant-{slug}@notify.ippoan.org         → INGEST_ENDPOINT + NOTIFY_WORKER_SECRET (prod)
+#   tenant-{slug}@notify-staging.ippoan.org → INGEST_ENDPOINT_STAGING + NOTIFY_WORKER_SECRET_STAGING
+# それ以外の host / 不正な local-part (= "tenant-{slug}" 形式でない) は silent drop。
+#
+# tenant 識別は body の `tenant_slug` で backend が `tenants.slug` から解決する。
+# 認証は shared secret (NOTIFY_WORKER_SECRET) で経路保護のみ。
+#
+# 必須 secret (デプロイ前に投入):
+#   wrangler secret put NOTIFY_WORKER_SECRET           # prod 値 (Secret Manager: notify-worker-secret)
+#   wrangler secret put NOTIFY_WORKER_SECRET_STAGING   # staging 値 (Secret Manager: notify-worker-secret-staging)
 
 [vars]
 INGEST_ENDPOINT = "https://alc-api.ippoan.org/api/notify/ingest"
 INGEST_ENDPOINT_STAGING = "https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/notify/ingest"
 PROD_HOST = "notify.ippoan.org"
 STAGING_HOST = "notify-staging.ippoan.org"
-
-# テナントごとの ingest_key を保持 (key=local-part, value=plaintext key)
-[[kv_namespaces]]
-binding = "INGEST_KEYS_KV"
-id = "3339456a3c0343c99e6114dcf9f70efb"
-
-[[kv_namespaces]]
-binding = "INGEST_KEYS_KV_STAGING"
-id = "7f1e4c04825148df9d4b9443ccee43c8"
 
 # staging Worker (notify-email-receiver-staging) は CI 都合で deploy はされるが
 # Email Routing の catch-all は1つしか持てないので実質受信しない。
@@ -34,11 +32,3 @@ name = "notify-email-receiver-staging"
 INGEST_ENDPOINT = "https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/notify/ingest"
 PROD_HOST = "notify-staging.ippoan.org"
 STAGING_HOST = "notify-staging.ippoan.org"
-
-[[env.staging.kv_namespaces]]
-binding = "INGEST_KEYS_KV"
-id = "7f1e4c04825148df9d4b9443ccee43c8"
-
-[[env.staging.kv_namespaces]]
-binding = "INGEST_KEYS_KV_STAGING"
-id = "7f1e4c04825148df9d4b9443ccee43c8"
