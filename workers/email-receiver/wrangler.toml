@@ -11,7 +11,7 @@ INGEST_ENDPOINT = "https://alc-api.ippoan.org/api/notify/ingest"
 # 例: tenant-acme@notify.ippoan.org → KV.get("tenant-acme") → ingest_key
 [[kv_namespaces]]
 binding = "INGEST_KEYS_KV"
-id = "REPLACE_WITH_PRODUCTION_KV_ID"
+id = "3339456a3c0343c99e6114dcf9f70efb"
 
 [env.staging]
 name = "notify-email-receiver-staging"
@@ -21,4 +21,4 @@ INGEST_ENDPOINT = "https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/noti
 
 [[env.staging.kv_namespaces]]
 binding = "INGEST_KEYS_KV"
-id = "REPLACE_WITH_STAGING_KV_ID"
+id = "7f1e4c04825148df9d4b9443ccee43c8"
