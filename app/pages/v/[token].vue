@@ -2,10 +2,10 @@
 // 配信受信者向けの公開 viewer ページ。ログイン不要。
 // /api/notify/read/{token} 経由で 302 redirect されてくる。
 //
-// ページ内で
-//   GET /api/notify/v/{token}      → メタデータ JSON
-//   <iframe src="...v/{token}/file"> → R2 inline PDF
-// を呼ぶ。
+// PDF は vue-pdf-embed (PDF.js) で <canvas> に描画する。
+// LINE / LINE WORKS の内蔵 webview は PDF をネイティブ表示できないので、
+// canvas に描画するしか確実な inline 表示の方法がない。
+import VuePdfEmbed from 'vue-pdf-embed'
 
 const route = useRoute()
 const config = useRuntimeConfig()
@@ -25,10 +25,17 @@ interface ViewMetadata {
 
 const meta = ref<ViewMetadata | null>(null)
 const status = ref<'loading' | 'ok' | 'gone' | 'not_found' | 'error'>('loading')
+const pdfLoaded = ref(false)
+const pdfPages = ref(0)
+const pdfError = ref('')
 
 const isPdf = computed(() => {
   const name = meta.value?.file_name ?? ''
   return name.toLowerCase().endsWith('.pdf')
+})
+const isImage = computed(() => {
+  const name = meta.value?.file_name?.toLowerCase() ?? ''
+  return /\.(png|jpe?g|gif|webp|svg)$/.test(name)
 })
 
 function formatSize(bytes: number | null): string {
@@ -59,11 +66,20 @@ async function load() {
   }
 }
 
+function onPdfLoaded(doc: { numPages: number }) {
+  pdfPages.value = doc?.numPages ?? 0
+  pdfLoaded.value = true
+}
+
+function onPdfError(e: unknown) {
+  pdfError.value = e instanceof Error ? e.message : String(e)
+}
+
 onMounted(load)
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50">
+  <div class="min-h-screen bg-gray-100">
     <!-- 上部バー -->
     <header class="bg-white shadow-sm border-b sticky top-0 z-10">
       <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
@@ -76,16 +92,13 @@ onMounted(load)
             <span v-if="meta.source_sender"> · {{ meta.source_sender }}</span>
             <span v-if="meta.source_received_at"> · {{ formatDate(meta.source_received_at) }}</span>
             <span v-if="meta.file_size_bytes"> · {{ formatSize(meta.file_size_bytes) }}</span>
+            <span v-if="isPdf && pdfPages"> · {{ pdfPages }}ページ</span>
           </div>
         </div>
-        <a v-if="status === 'ok'" :href="fileUrl" target="_blank" rel="noopener"
-           class="shrink-0 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded hover:bg-blue-700 whitespace-nowrap">
-          📄 開く
-        </a>
       </div>
     </header>
 
-    <main class="max-w-5xl mx-auto px-4 py-4">
+    <main class="max-w-5xl mx-auto px-2 sm:px-4 py-3">
       <div v-if="status === 'loading'" class="text-center py-20 text-gray-500">
         読み込み中…
       </div>
@@ -103,27 +116,45 @@ onMounted(load)
           再試行
         </button>
       </div>
-      <div v-else>
-        <!-- モバイル (Android Chrome は iframe で PDF を render せず DL する): 大きい「開く」ボタンのみ -->
-        <div class="md:hidden text-center py-12">
-          <a :href="fileUrl" target="_blank" rel="noopener"
-             class="inline-block bg-blue-600 text-white text-xl font-bold px-10 py-5 rounded-2xl hover:bg-blue-700 shadow-lg active:scale-95 transition">
-            📄 {{ isPdf ? 'PDF を開く' : 'ファイルを開く' }}
-          </a>
-          <p class="mt-4 text-sm text-gray-500">タップすると別タブで開きます</p>
-        </div>
-        <!-- デスクトップ (md+): iframe で inline 表示 -->
-        <div class="hidden md:block">
-          <iframe v-if="isPdf" :src="fileUrl" class="w-full h-[80vh] bg-white border rounded shadow-sm"
-                  title="PDF ビューア"></iframe>
-          <div v-else class="text-center py-20">
-            <a :href="fileUrl" target="_blank" rel="noopener"
-               class="inline-block bg-blue-600 text-white text-lg font-medium px-8 py-4 rounded-lg hover:bg-blue-700">
-              📥 ファイルを開く
-            </a>
+      <div v-else-if="isPdf">
+        <!-- PDF.js (canvas 描画): モバイル webview 含む全環境で確実に inline 表示 -->
+        <ClientOnly>
+          <div v-if="!pdfLoaded && !pdfError" class="text-center py-12 text-gray-500 text-sm">
+            PDF を読み込み中…
           </div>
-        </div>
+          <div v-if="pdfError" class="text-center py-12">
+            <p class="text-red-700 text-sm">PDF の読み込みに失敗しました</p>
+            <p class="text-xs text-gray-500 mt-1">{{ pdfError }}</p>
+          </div>
+          <VuePdfEmbed
+            :source="fileUrl"
+            class="bg-white shadow-sm rounded"
+            @loaded="onPdfLoaded"
+            @loading-failed="onPdfError"
+          />
+        </ClientOnly>
+      </div>
+      <div v-else-if="isImage" class="text-center">
+        <img :src="fileUrl" :alt="meta?.file_name ?? ''" class="max-w-full mx-auto rounded shadow-sm" />
+      </div>
+      <div v-else class="text-center py-20">
+        <a :href="fileUrl" target="_blank" rel="noopener"
+           class="inline-block bg-blue-600 text-white text-lg font-medium px-8 py-4 rounded-lg hover:bg-blue-700">
+          📥 ファイルを開く
+        </a>
       </div>
     </main>
   </div>
 </template>
+
+<style scoped>
+/* vue-pdf-embed のページを横に余白を持たせて並べる (見やすさ) */
+:deep(.vue-pdf-embed__page) {
+  margin-bottom: 12px;
+}
+:deep(.vue-pdf-embed__page canvas) {
+  width: 100% !important;
+  height: auto !important;
+  display: block;
+}
+</style>
