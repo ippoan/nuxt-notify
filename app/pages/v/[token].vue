@@ -104,24 +104,24 @@ onMounted(load)
         </button>
       </div>
       <div v-else>
-        <!-- PDF: iframe で inline 表示 (デスクトップ向け、モバイルでも一部端末で表示) -->
-        <iframe v-if="isPdf" :src="fileUrl" class="w-full h-[80vh] bg-white border rounded shadow-sm"
-                title="PDF ビューア"></iframe>
-        <!-- 非 PDF (画像 / Office 等): 「開く」ボタンを大きく表示 -->
-        <div v-else class="text-center py-20">
+        <!-- モバイル (Android Chrome は iframe で PDF を render せず DL する): 大きい「開く」ボタンのみ -->
+        <div class="md:hidden text-center py-12">
           <a :href="fileUrl" target="_blank" rel="noopener"
-             class="inline-block bg-blue-600 text-white text-lg font-medium px-8 py-4 rounded-lg hover:bg-blue-700">
-            📥 ファイルを開く
+             class="inline-block bg-blue-600 text-white text-xl font-bold px-10 py-5 rounded-2xl hover:bg-blue-700 shadow-lg active:scale-95 transition">
+            📄 {{ isPdf ? 'PDF を開く' : 'ファイルを開く' }}
           </a>
+          <p class="mt-4 text-sm text-gray-500">タップすると別タブで開きます</p>
         </div>
-
-        <!-- モバイル / iframe 未対応端末向け fallback ボタン -->
-        <div v-if="isPdf" class="mt-4 text-center sm:hidden">
-          <a :href="fileUrl" target="_blank" rel="noopener"
-             class="inline-block bg-blue-600 text-white text-base font-medium px-6 py-3 rounded-lg hover:bg-blue-700">
-            📄 PDF を別タブで開く
-          </a>
-          <p class="mt-2 text-xs text-gray-500">表示されない場合はこちらをタップ</p>
+        <!-- デスクトップ (md+): iframe で inline 表示 -->
+        <div class="hidden md:block">
+          <iframe v-if="isPdf" :src="fileUrl" class="w-full h-[80vh] bg-white border rounded shadow-sm"
+                  title="PDF ビューア"></iframe>
+          <div v-else class="text-center py-20">
+            <a :href="fileUrl" target="_blank" rel="noopener"
+               class="inline-block bg-blue-600 text-white text-lg font-medium px-8 py-4 rounded-lg hover:bg-blue-700">
+              📥 ファイルを開く
+            </a>
+          </div>
         </div>
       </div>
     </main>
