@@ -13,6 +13,9 @@ const apiBase = config.public.apiBase as string
 
 const token = computed(() => String(route.params.token))
 const fileUrl = computed(() => `${apiBase}/api/notify/v/${token.value}/file`)
+// iframe 用: Chrome PDF ビューアの toolbar / nav pane を隠してすっきり見せる。
+// (新タブで開くボタンは fileUrl のまま — toolbar 経由で download / print したい)
+const iframeUrl = computed(() => `${fileUrl.value}#toolbar=0&navpanes=0`)
 
 interface ViewMetadata {
   file_name: string | null
@@ -114,7 +117,7 @@ onMounted(load)
         </div>
         <!-- デスクトップ (md+): iframe で inline 表示 -->
         <div class="hidden md:block">
-          <iframe v-if="isPdf" :src="fileUrl" class="w-full h-[80vh] bg-white border rounded shadow-sm"
+          <iframe v-if="isPdf" :src="iframeUrl" class="w-full h-[80vh] bg-white border rounded shadow-sm"
                   title="PDF ビューア"></iframe>
           <div v-else class="text-center py-20">
             <a :href="fileUrl" target="_blank" rel="noopener"
