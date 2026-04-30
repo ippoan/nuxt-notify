@@ -20,10 +20,18 @@ const emit = defineEmits<{
 
 const recipients = ref<Recipient[]>([])
 const selected = ref<Set<string>>(new Set())
+const retentionDays = ref<number>(7)
 const loading = ref(true)
 const loadError = ref('')
 const sending = ref(false)
 const sendError = ref('')
+
+const retentionOptions = [
+  { value: 1, label: '1 日' },
+  { value: 7, label: '7 日 (1 週間)' },
+  { value: 30, label: '30 日 (1 ヶ月)' },
+  { value: 90, label: '90 日 (3 ヶ月)' },
+]
 
 const enabledRecipients = computed(() => recipients.value.filter(r => r.enabled))
 
@@ -63,7 +71,10 @@ async function submit() {
       `/notify/documents/${props.documentId}/distribute`,
       {
         method: 'POST',
-        body: JSON.stringify({ target: { recipient_ids: [...selected.value] } }),
+        body: JSON.stringify({
+          target: { recipient_ids: [...selected.value] },
+          retention_days: retentionDays.value,
+        }),
       },
     )
     emit('distributed', result)
@@ -91,6 +102,20 @@ onMounted(load)
       <!-- Body -->
       <div class="px-5 py-4 overflow-y-auto flex-1">
         <div class="text-xs text-gray-500 mb-3 truncate">📄 {{ fileName ?? '(無名)' }}</div>
+
+        <!-- 閲覧期限 -->
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-1">閲覧期限</label>
+          <select v-model.number="retentionDays"
+                  class="w-full border rounded px-3 py-2 text-sm bg-white">
+            <option v-for="opt in retentionOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">
+            この期間を過ぎると「詳細を見る」リンクは失効します。
+          </p>
+        </div>
 
         <div class="flex items-center justify-between mb-2">
           <span class="text-sm text-gray-600">
