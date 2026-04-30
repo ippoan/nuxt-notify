@@ -50,8 +50,8 @@ const detail = ref<EmailDetail | null>(null)
 const deliveriesByDoc = ref<Record<string, Delivery[]>>({})
 const loading = ref(true)
 const error = ref('')
-const distributing = ref<Record<string, boolean>>({})
 const deleting = ref<Record<string, boolean>>({})
+const distributeTarget = ref<EmailDocument | null>(null)
 
 async function loadDetail() {
   loading.value = true
@@ -101,20 +101,13 @@ async function downloadDoc(doc: EmailDocument) {
   }
 }
 
-async function distribute(doc: EmailDocument) {
-  if (!confirm(`「${doc.file_name ?? 'ドキュメント'}」を全受信者に配信しますか?`)) return
-  distributing.value[doc.id] = true
-  try {
-    await apiFetch(`/notify/documents/${doc.id}/distribute`, {
-      method: 'POST',
-      body: JSON.stringify({ target: { all: true } }),
-    })
-    await loadDetail()
-  } catch (e: any) {
-    alert(`配信失敗: ${e.message ?? e}`)
-  } finally {
-    distributing.value[doc.id] = false
-  }
+function openDistribute(doc: EmailDocument) {
+  distributeTarget.value = doc
+}
+
+async function onDistributed(result: { sent: number; failed: number; total: number }) {
+  alert(`配信完了: 成功 ${result.sent} / 失敗 ${result.failed} / 合計 ${result.total}`)
+  await loadDetail()
 }
 
 async function deleteDoc(doc: EmailDocument) {
@@ -207,9 +200,9 @@ onMounted(loadDetail)
                     class="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded">
               ダウンロード
             </button>
-            <button @click="distribute(doc)" :disabled="distributing[doc.id]"
-                    class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-1 rounded disabled:opacity-50">
-              {{ distributing[doc.id] ? '配信中...' : '配信' }}
+            <button @click="openDistribute(doc)"
+                    class="text-xs bg-blue-600 text-white hover:bg-blue-700 px-3 py-1 rounded">
+              配信
             </button>
             <button @click="deleteDoc(doc)" :disabled="deleting[doc.id]"
                     class="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1 rounded disabled:opacity-50">
@@ -253,5 +246,11 @@ onMounted(loadDetail)
         <div v-else class="text-xs text-gray-400 mt-2">未配信</div>
       </div>
     </div>
+
+    <DistributeModal v-if="distributeTarget"
+                     :document-id="distributeTarget.id"
+                     :file-name="distributeTarget.file_name"
+                     @close="distributeTarget = null"
+                     @distributed="onDistributed" />
   </div>
 </template>
