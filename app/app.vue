@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { useAuth, AuthToolbar } from '@ippoan/auth-client'
 
+const route = useRoute()
 const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin } = useAuth()
 const runtimeConfig = useRuntimeConfig()
 const { apiFetch } = useApi()
+
+// `/v/...` は配信受信者向けの公開 viewer (ログイン不要)。
+// header / 認証ゲートを丸ごとスキップして NuxtPage だけを描画する。
+const isPublicView = computed(() => route.path.startsWith('/v/'))
 
 const lineLoginUrl = computed(() => {
   const apiBase = runtimeConfig.public.apiBase as string
@@ -73,7 +78,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50">
+  <NuxtPage v-if="isPublicView" />
+  <div v-else class="min-h-screen bg-gray-50">
     <header class="bg-white shadow-sm border-b">
       <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
         <NuxtLink to="/" class="text-lg font-bold text-gray-800">📨 Notify</NuxtLink>
