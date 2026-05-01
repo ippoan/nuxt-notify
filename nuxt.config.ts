@@ -12,7 +12,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: 'http://localhost:8080',
-      authWorkerUrl: 'https://auth.mtamaramu.com',
+      authWorkerUrl: 'https://auth.ippoan.org',
       stagingTenantId: '',
     },
   },
