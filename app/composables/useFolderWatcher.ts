@@ -209,6 +209,8 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
         pending.value.push({ key, name: file.name, size: file.size, mtime: file.lastModified, file })
       }
       await refreshLists()
+      // ループが完走したなら permission は granted で確定 → 「再開」UI を引っ込めて良い
+      needsResume.value = false
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {

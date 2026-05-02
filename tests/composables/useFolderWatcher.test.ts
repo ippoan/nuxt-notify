@@ -300,6 +300,19 @@ describe('useFolderWatcher', () => {
 
   // ---------- scanNow ----------
 
+  it('scanNow: successful completion clears needsResume', async () => {
+    const handle = fakeDirHandle([])
+    dbState.dir = { id: 'main', handle, name: 'inbox' }
+    const w = useFolderWatcher({
+      upload: vi.fn(), setIntervalImpl: vi.fn(() => 1 as any) as any, clearIntervalImpl: vi.fn() as any,
+    })
+    await w.init()
+    expect(w.needsResume.value).toBe(true)
+    // resumeWatch を経由せず scanNow を直叩き
+    await w.scanNow()
+    expect(w.needsResume.value).toBe(false)
+  })
+
   it('scanNow: filters non-files, disallowed ext, excluded, zero-size, already-seen', async () => {
     const goodPdf = fakeFile('good.pdf', 50, 1)
     const exe = fakeFile('bad.exe', 50, 1)
