@@ -68,6 +68,9 @@ function distributionBadge(status: string): { label: string; cls: string } {
       </div>
     </div>
 
+    <!-- FolderWatcher の pending list はここに Teleport される -->
+    <div id="folder-watcher-pending"></div>
+
     <div v-if="loading" class="text-gray-500">読み込み中...</div>
     <div v-else-if="error" class="text-red-500">{{ error }}</div>
     <div v-else-if="documents.length === 0" class="text-gray-400">ドキュメントはまだありません</div>
