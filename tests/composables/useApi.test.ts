@@ -113,4 +113,47 @@ describe('useApi', () => {
       headers: { 'Content-Type': 'application/json' },
     })
   })
+
+  describe('uploadFetch', () => {
+    it('POSTs FormData without Content-Type (boundary set by ofetch)', async () => {
+      mockFetch.mockResolvedValue({ document_ids: ['id-1'], count: 1 })
+      const { uploadFetch } = useApi()
+      const fd = new FormData()
+      fd.append('file', new File(['x'], 'x.pdf'), 'x.pdf')
+
+      const res = await uploadFetch('/notify/documents/upload', fd)
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:8080/api/notify/documents/upload',
+        { method: 'POST', body: fd, headers: {} },
+      )
+      expect(res).toEqual({ document_ids: ['id-1'], count: 1 })
+    })
+
+    it('adds Authorization header for uploadFetch when JWT present', async () => {
+      mockToken.value = 'jwt-upload'
+      mockFetch.mockResolvedValue({ count: 0 })
+      const { uploadFetch } = useApi()
+      const fd = new FormData()
+      await uploadFetch('/notify/documents/upload', fd)
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:8080/api/notify/documents/upload',
+        { method: 'POST', body: fd, headers: { Authorization: 'Bearer jwt-upload' } },
+      )
+    })
+
+    it('adds X-Tenant-ID header for uploadFetch when no JWT', async () => {
+      mockOrgId.value = 'tenant-upload'
+      mockFetch.mockResolvedValue({ count: 0 })
+      const { uploadFetch } = useApi()
+      const fd = new FormData()
+      await uploadFetch('/notify/documents/upload', fd)
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:8080/api/notify/documents/upload',
+        { method: 'POST', body: fd, headers: { 'X-Tenant-ID': 'tenant-upload' } },
+      )
+    })
+  })
 })
