@@ -78,11 +78,16 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
       error.value = e instanceof Error ? e.message : String(e)
       return
     }
+    const wasWatching = isWatching.value
     dirHandle.value = handle
     dirName.value = handle.name
     await folderWatchDb.setDir(handle, handle.name)
     needsResume.value = false
-    await startWatching()
+    // 既に監視中なら timer は新しい dirHandle を使い続けるので
+    // 1 回だけ即時スキャンして新フォルダを反映する。
+    // 未監視なら startWatching が timer + 初回スキャンを起動する。
+    if (wasWatching) await scanNow()
+    else await startWatching()
   }
 
   async function ensurePermission(): Promise<boolean> {

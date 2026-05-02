@@ -35,8 +35,12 @@ function onIntervalChange(e: Event) {
       </button>
 
       <template v-else>
-        <span class="text-sm text-gray-600">
+        <button type="button" @click="watcher.pickFolder()"
+                title="クリックでフォルダを変更"
+                class="text-sm text-gray-600 hover:text-blue-700 hover:underline cursor-pointer">
           📁 {{ watcher.dirName.value }}
+        </button>
+        <span class="text-sm">
           <span v-if="watcher.isWatching.value" class="text-emerald-600">● 監視中</span>
           <span v-else class="text-gray-400">○ 停止中</span>
         </span>

@@ -150,6 +150,33 @@ describe('useFolderWatcher', () => {
     expect(w.seen.value[0]?.status).toBe('uploaded')
   })
 
+  it('pickFolder while watching → swaps folder, scans once, no extra timer', async () => {
+    const fileA = fakeFile('a.pdf', 100, 1)
+    const fileB = fakeFile('b.pdf', 200, 2)
+    const handleA = { ...fakeDirHandle([fileA]), name: 'folderA' } as unknown as FileSystemDirectoryHandle
+    const handleB = { ...fakeDirHandle([fileB]), name: 'folderB' } as unknown as FileSystemDirectoryHandle
+    const picker = vi.fn().mockResolvedValueOnce(handleA).mockResolvedValueOnce(handleB)
+    ;(globalThis as any).showDirectoryPicker = picker
+    const upload = vi.fn().mockResolvedValue({ document_ids: ['d'], count: 1 })
+    const setIntervalImpl = vi.fn(() => 1 as any) as any
+
+    const w = useFolderWatcher({
+      upload, setIntervalImpl, clearIntervalImpl: vi.fn() as any,
+    })
+    await w.pickFolder() // 初回: folderA → startWatching + scanNow
+    expect(w.dirName.value).toBe('folderA')
+    expect(setIntervalImpl).toHaveBeenCalledTimes(1)
+    expect(upload).toHaveBeenCalledTimes(1)
+
+    await w.pickFolder() // 2 回目: folderB → scanNow のみ (timer は再生成しない)
+    expect(w.dirName.value).toBe('folderB')
+    expect(setIntervalImpl).toHaveBeenCalledTimes(1) // 増えない
+    expect(upload).toHaveBeenCalledTimes(2)
+    const seenNames = w.seen.value.map((s) => s.name)
+    expect(seenNames).toContain('a.pdf')
+    expect(seenNames).toContain('b.pdf')
+  })
+
   it('resumeWatch with no handle is a no-op', async () => {
     const w = useFolderWatcher({ upload: vi.fn() })
     await w.resumeWatch()
