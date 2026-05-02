@@ -12,6 +12,14 @@ export interface UploadResponse {
   count: number
 }
 
+export interface PendingFile {
+  key: string
+  name: string
+  size: number
+  mtime: number
+  file: File
+}
+
 interface FolderWatcherOptions {
   upload?: (path: string, fd: FormData) => Promise<UploadResponse>
   /** ms 単位の interval setter (テスト差し替え用) */
@@ -37,12 +45,15 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
   const dirName = ref<string>('')
   const isWatching = ref(false)
   const isScanning = ref(false)
+  const isUploading = ref(false)
   const needsResume = ref(false) // 起動直後に handle はあるが permission 未取得
   const error = ref('')
 
   const pollIntervalSec = ref<PollIntervalSec>(10)
   const seen = ref<SeenRow[]>([])
   const excluded = ref<ExcludedRow[]>([])
+  /** スキャンで検出されたがユーザーがまだアップロードしていないファイル (in-memory) */
+  const pending = ref<PendingFile[]>([])
 
   let timer: ReturnType<typeof setInterval> | null = null
 
@@ -79,6 +90,8 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
       return
     }
     const wasWatching = isWatching.value
+    // 別フォルダに切り替わるので、旧フォルダ由来の pending は破棄
+    pending.value = []
     dirHandle.value = handle
     dirName.value = handle.name
     await folderWatchDb.setDir(handle, handle.name)
@@ -141,6 +154,7 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
     dirHandle.value = null
     dirName.value = ''
     needsResume.value = false
+    pending.value = []
   }
 
   function setPollInterval(sec: PollIntervalSec) {
@@ -153,6 +167,11 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
     }, sec * 1000)
   }
 
+  /**
+   * フォルダを列挙し、新規ファイルを `pending` に追加する。
+   * **アップロードは行わない** — ユーザーが `uploadPending` を呼ぶまで待つ。
+   * サイズ超過は永続的に弾く必要があるので即 `seen` に failed として記録する。
+   */
   async function scanNow() {
     if (!dirHandle.value || isScanning.value) return
     isScanning.value = true
@@ -174,6 +193,7 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
         if (file.size === 0) continue
         const key = makeSeenKey(file)
         if (await folderWatchDb.hasSeenKey(key)) continue
+        if (pending.value.some((p) => p.key === key)) continue
         if (file.size > MAX_FILE_BYTES) {
           await folderWatchDb.addSeen({
             key,
@@ -186,32 +206,7 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
           })
           continue
         }
-        const fd = new FormData()
-        fd.append('file', file, file.name)
-        try {
-          const res = await upload('/notify/documents/upload', fd)
-          await folderWatchDb.addSeen({
-            key,
-            name: file.name,
-            size: file.size,
-            mtime: file.lastModified,
-            status: 'uploaded',
-            at: Date.now(),
-            documentId: res.document_ids[0],
-          })
-        } catch (e: unknown) {
-          const errObj = e as { response?: { status?: number }; statusCode?: number; message?: string }
-          const status = errObj?.response?.status ?? errObj?.statusCode
-          await folderWatchDb.addSeen({
-            key,
-            name: file.name,
-            size: file.size,
-            mtime: file.lastModified,
-            status: 'failed',
-            at: Date.now(),
-            errorMessage: status ? `HTTP ${status}` : (errObj?.message ?? 'unknown error'),
-          })
-        }
+        pending.value.push({ key, name: file.name, size: file.size, mtime: file.lastModified, file })
       }
       await refreshLists()
     } catch (e: unknown) {
@@ -221,8 +216,68 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
     }
   }
 
+  /** pending 1 件をアップロードして seen に移す */
+  async function uploadPending(key: string): Promise<boolean> {
+    const i = pending.value.findIndex((p) => p.key === key)
+    if (i < 0) return false
+    const p = pending.value[i]!
+    isUploading.value = true
+    try {
+      const fd = new FormData()
+      fd.append('file', p.file, p.name)
+      try {
+        const res = await upload('/notify/documents/upload', fd)
+        await folderWatchDb.addSeen({
+          key: p.key,
+          name: p.name,
+          size: p.size,
+          mtime: p.mtime,
+          status: 'uploaded',
+          at: Date.now(),
+          documentId: res.document_ids[0],
+        })
+        pending.value.splice(i, 1)
+        await refreshLists()
+        return true
+      } catch (e: unknown) {
+        const errObj = e as { response?: { status?: number }; statusCode?: number; message?: string }
+        const status = errObj?.response?.status ?? errObj?.statusCode
+        await folderWatchDb.addSeen({
+          key: p.key,
+          name: p.name,
+          size: p.size,
+          mtime: p.mtime,
+          status: 'failed',
+          at: Date.now(),
+          errorMessage: status ? `HTTP ${status}` : (errObj?.message ?? 'unknown error'),
+        })
+        pending.value.splice(i, 1)
+        await refreshLists()
+        return false
+      }
+    } finally {
+      isUploading.value = false
+    }
+  }
+
+  /** pending 全件を順次アップロード */
+  async function uploadAllPending(): Promise<{ ok: number; failed: number }> {
+    let ok = 0
+    let failed = 0
+    // splice しながら回ると index がずれるので key スナップショットで回す
+    const keys = pending.value.map((p) => p.key)
+    for (const key of keys) {
+      const success = await uploadPending(key)
+      if (success) ok++
+      else failed++
+    }
+    return { ok, failed }
+  }
+
   async function excludeName(name: string) {
     await folderWatchDb.addExcluded(name)
+    // pending にあるものも即削除
+    pending.value = pending.value.filter((p) => p.name !== name)
     await refreshLists()
   }
 
@@ -241,11 +296,13 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
     dirName,
     isWatching,
     isScanning,
+    isUploading,
     needsResume,
     error,
     pollIntervalSec,
     seen,
     excluded,
+    pending,
     // actions
     init,
     pickFolder,
@@ -254,6 +311,8 @@ export function useFolderWatcher(options: FolderWatcherOptions = {}) {
     unwatchFolder,
     setPollInterval,
     scanNow,
+    uploadPending,
+    uploadAllPending,
     excludeName,
     unexcludeName,
     clearProcessed,
