@@ -17,7 +17,9 @@ const documents = ref<NotifyDocument[]>([])
 const loading = ref(true)
 const error = ref('')
 
-onMounted(async () => {
+async function reload() {
+  loading.value = true
+  error.value = ''
   try {
     documents.value = await apiFetch<NotifyDocument[]>('/notify/documents?limit=20')
   } catch (e: any) {
@@ -25,7 +27,9 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(reload)
 
 function extractionBadge(status: string): { label: string; cls: string } {
   switch (status) {
@@ -56,7 +60,10 @@ function distributionBadge(status: string): { label: string; cls: string } {
 
 <template>
   <div>
-    <h2 class="text-xl font-bold mb-4">ドキュメント一覧</h2>
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">ドキュメント一覧</h2>
+      <UploadButton @uploaded="reload" />
+    </div>
 
     <div v-if="loading" class="text-gray-500">読み込み中...</div>
     <div v-else-if="error" class="text-red-500">{{ error }}</div>

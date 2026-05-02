@@ -4,3 +4,7 @@
 [[files]]
 path = "app/composables/useApi.ts"
 branches = true
+
+[[files]]
+path = "app/composables/useFilePicker.ts"
+branches = true
