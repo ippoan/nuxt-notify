@@ -12,12 +12,24 @@ onMounted(async () => {
 
 const successCount = computed(() => watcher.seen.value.filter((s) => s.status === 'uploaded').length)
 const failedSeen = computed(() => watcher.seen.value.filter((s) => s.status === 'failed'))
+const pendingCount = computed(() => watcher.pending.value.length)
 
-async function onScanClick() {
-  const before = successCount.value
-  await watcher.scanNow()
-  const added = successCount.value - before
-  if (added > 0) emit('uploaded', added)
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+async function onUploadOne(key: string) {
+  const ok = await watcher.uploadPending(key)
+  if (ok) emit('uploaded', 1)
+}
+
+async function onUploadAll() {
+  const before = pendingCount.value
+  const res = await watcher.uploadAllPending()
+  if (res.ok > 0) emit('uploaded', res.ok)
+  void before // referenced for clarity
 }
 
 function onIntervalChange(e: Event) {
@@ -44,6 +56,10 @@ function onIntervalChange(e: Event) {
           <span v-if="watcher.isWatching.value" class="text-emerald-600">● 監視中</span>
           <span v-else class="text-gray-400">○ 停止中</span>
         </span>
+        <span v-if="pendingCount > 0"
+              class="px-1.5 py-0.5 text-xs bg-amber-100 text-amber-800 rounded-full font-semibold">
+          保留 {{ pendingCount }}
+        </span>
         <button v-if="watcher.needsResume.value" type="button" @click="watcher.resumeWatch()"
                 class="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">
           再開
@@ -52,9 +68,13 @@ function onIntervalChange(e: Event) {
                 class="px-2 py-1 text-xs bg-gray-300 text-gray-800 rounded hover:bg-gray-400">
           停止
         </button>
-        <button type="button" @click="onScanClick" :disabled="watcher.isScanning.value"
+        <button type="button" @click="watcher.scanNow()" :disabled="watcher.isScanning.value"
                 class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
           {{ watcher.isScanning.value ? 'スキャン中…' : '今すぐスキャン' }}
+        </button>
+        <button v-if="pendingCount > 0" type="button" @click="onUploadAll" :disabled="watcher.isUploading.value"
+                class="px-2 py-1 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50">
+          {{ watcher.isUploading.value ? 'アップロード中…' : `全部アップロード (${pendingCount})` }}
         </button>
         <button type="button" @click="open = !open"
                 class="px-2 py-1 text-xs bg-gray-200 text-gray-800 rounded hover:bg-gray-300">
@@ -65,7 +85,7 @@ function onIntervalChange(e: Event) {
 
     <div v-if="watcher.error.value" class="text-xs text-red-600 mt-1">{{ watcher.error.value }}</div>
 
-    <div v-if="open && watcher.dirName.value" class="absolute right-0 z-10 mt-2 w-96 bg-white border rounded-lg shadow-lg p-3 text-sm">
+    <div v-if="open && watcher.dirName.value" class="absolute right-0 z-10 mt-2 w-[28rem] bg-white border rounded-lg shadow-lg p-3 text-sm">
       <div class="flex justify-between items-center mb-2">
         <span class="font-semibold">監視設定</span>
         <button type="button" @click="open = false" class="text-gray-400 hover:text-gray-600">×</button>
@@ -78,6 +98,29 @@ function onIntervalChange(e: Event) {
           <option v-for="sec in POLL_INTERVAL_OPTIONS" :key="sec" :value="sec">{{ sec }} 秒</option>
         </select>
       </label>
+
+      <div v-if="pendingCount > 0" class="mb-3">
+        <div class="flex justify-between items-center mb-1">
+          <div class="font-semibold text-xs text-amber-800">保留中 ({{ pendingCount }})</div>
+          <button type="button" @click="onUploadAll" :disabled="watcher.isUploading.value"
+                  class="px-2 py-0.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50">
+            全部アップロード
+          </button>
+        </div>
+        <ul class="text-xs space-y-1 max-h-32 overflow-y-auto">
+          <li v-for="p in watcher.pending.value" :key="p.key"
+              class="flex items-center gap-1 bg-amber-50 rounded px-1 py-0.5">
+            <span class="truncate flex-1">{{ p.name }}</span>
+            <span class="text-gray-500 flex-shrink-0">{{ fmtSize(p.size) }}</span>
+            <button type="button" @click="onUploadOne(p.key)" :disabled="watcher.isUploading.value"
+                    class="px-1.5 py-0.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
+                    title="このファイルをアップロード">↑</button>
+            <button type="button" @click="watcher.excludeName(p.name)"
+                    class="px-1.5 py-0.5 text-xs bg-gray-300 text-gray-800 rounded hover:bg-gray-400"
+                    title="今後このファイル名を無視">除外</button>
+          </li>
+        </ul>
+      </div>
 
       <div class="mb-3">
         <div class="font-semibold text-xs mb-1">アップロード成功 ({{ successCount }})</div>
