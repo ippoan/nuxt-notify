@@ -8,3 +8,11 @@ branches = true
 [[files]]
 path = "app/composables/useFilePicker.ts"
 branches = true
+
+[[files]]
+path = "app/composables/useFolderWatcher.ts"
+branches = true
+
+[[files]]
+path = "app/utils/folderWatchDb.ts"
+branches = true

@@ -60,9 +60,12 @@ function distributionBadge(status: string): { label: string; cls: string } {
 
 <template>
   <div>
-    <div class="flex justify-between items-center mb-4">
+    <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
       <h2 class="text-xl font-bold">ドキュメント一覧</h2>
-      <UploadButton @uploaded="reload" />
+      <div class="flex items-center gap-2">
+        <FolderWatcher @uploaded="reload" />
+        <UploadButton @uploaded="reload" />
+      </div>
     </div>
 
     <div v-if="loading" class="text-gray-500">読み込み中...</div>
