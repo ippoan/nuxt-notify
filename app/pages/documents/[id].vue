@@ -55,7 +55,13 @@ const showDistribute = ref(false)
 
 // プレビュー: redacted (default) / 原本 を切替
 const previewMode = ref<'redacted' | 'original'>('redacted')
-const previewPdfData = ref<Uint8Array | null>(null)
+// VuePdfEmbed (pdfjs-dist) は Uint8Array を直接渡すと Worker に
+// `postMessage(transfer)` で buffer が detach される。tab 切替や WS event で
+// 並行 loadPreview() が走ると、前 buffer が Worker に届いた瞬間に main thread
+// 側の ref が detach 済みになり「ArrayBuffer at index 0 is already detached」
+// が発生する。Blob URL 経由にすると、PDF.js が内部で URL から fetch するので
+// 各ロードで独立 ArrayBuffer が割り当てられ、main thread 上の参照は無関係になる。
+const previewPdfSource = ref<string | null>(null)
 const previewLoading = ref(false)
 const previewError = ref('')
 const pdfPages = ref(0)
@@ -65,12 +71,17 @@ const recomputing = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 // 進行中の preview fetch を中断するための controller。
-// tab 切替 (switchPreview) / WS event (onRedactUpdate) / 再 redact 完了 polling が
-// 並行に loadPreview() を呼ぶと、PDF.js Worker がまだ前の Uint8Array を処理中に
-// 新しい代入が走り、Worker への postMessage 時に「ArrayBuffer at index 0 is
-// already detached」が発生する。常に直前の fetch を abort + buffer を独立 copy
-// (buf.slice(0)) することで、Worker 委譲済 buffer と main thread の ref を切り離す。
+// 古い response が遅れて到着し新 Blob URL を上書きするのを防ぐ。
 let previewAbort: AbortController | null = null
+// 直前の Blob URL — 新しい URL に切り替えたら revokeObjectURL して memory を返す。
+let previewBlobUrl: string | null = null
+
+function releaseBlobUrl() {
+  if (previewBlobUrl) {
+    URL.revokeObjectURL(previewBlobUrl)
+    previewBlobUrl = null
+  }
+}
 
 const isPdf = computed(() => {
   const name = document.value?.file_name?.toLowerCase() ?? ''
@@ -146,13 +157,15 @@ function schedulePollIfProcessing() {
 
 async function loadPreview() {
   if (!document.value || !isPdf.value) return
-  // 直前の fetch があれば abort。古い ArrayBuffer が Worker に渡る前の段階で
-  // 切り捨てる (Worker 委譲後はこちらでキャンセルできないため、network 段で止める)。
+  // 直前の fetch があれば abort。古い response が遅れて到着して新 URL を
+  // 上書きするのを防ぐ。
   previewAbort?.abort()
   const ctrl = new AbortController()
   previewAbort = ctrl
-  // 旧 buffer の参照を即座に外す。VuePdfEmbed が前 buffer を破棄できる猶予を作る。
-  previewPdfData.value = null
+  // 旧 source を即座に外し、旧 Blob URL を解放 (memory leak 防止)。
+  // VuePdfEmbed は source=null で内部 PDF document も unload してくれる。
+  previewPdfSource.value = null
+  releaseBlobUrl()
   previewLoading.value = true
   previewError.value = ''
   pdfPages.value = 0
@@ -167,19 +180,23 @@ async function loadPreview() {
     }
     const qs = previewMode.value === 'original' ? '?original=true' : ''
     // VuePdfEmbed は string URL で fetch すると認証ヘッダを付けられない。
-    // 認証付きで bytes を取得して Uint8Array で渡す (PDF.js が直接受け取れる形)。
-    // fetchPdfBytes は内部で buf.slice(0) して独立 ArrayBuffer を返すため、
-    // PDF.js Worker への transfer が main thread 側 ref を detach しない。
+    // 認証付きで bytes を取得 → Blob にして Object URL を作り、source に渡す。
+    // pdfjs-dist は URL を内部で fetch するので独立 ArrayBuffer が割り当てられ、
+    // main thread 上の他参照とは完全に分離される (= Worker transfer による detach
+    // race が構造的に発生しなくなる)。
     const bytes = await fetchPdfBytes(
       `${apiBase}/api/notify/documents/${document.value.id}/preview${qs}`,
       { headers, signal: ctrl.signal },
     )
     if (ctrl.signal.aborted) return
-    previewPdfData.value = bytes
+    const blob = new Blob([bytes], { type: 'application/pdf' })
+    previewBlobUrl = URL.createObjectURL(blob)
+    previewPdfSource.value = previewBlobUrl
   } catch (e: any) {
     if (e?.name === 'AbortError' || ctrl.signal.aborted) return
     previewError.value = e.message || String(e)
-    previewPdfData.value = null
+    previewPdfSource.value = null
+    releaseBlobUrl()
   } finally {
     if (previewAbort === ctrl) {
       previewLoading.value = false
@@ -204,7 +221,8 @@ async function recomputeRedaction() {
     await apiFetch(`/notify/documents/${document.value.id}/redact-recompute`, { method: 'POST' })
     // 状態を即座に処理中に倒して polling 開始 (バック側は async で processing→completed)
     if (document.value) document.value.redaction_status = 'processing'
-    previewPdfData.value = null
+    previewPdfSource.value = null
+    releaseBlobUrl()
     schedulePollIfProcessing()
   } catch (e: any) {
     alert(`再 redact 失敗: ${e.message ?? e}`)
@@ -335,7 +353,7 @@ onRedactUpdate((ev) => {
     document.value.redaction_error = ev.redaction_error
   }
   // completed になったらプレビューを再ロード
-  if (ev.status === 'completed' && isPdf.value && !previewPdfData.value) {
+  if (ev.status === 'completed' && isPdf.value && !previewPdfSource.value) {
     loadPreview()
   }
 })
@@ -348,6 +366,8 @@ onUnmounted(() => {
   // 進行中の preview fetch があれば abort。leak した Worker 通信を絶つ。
   previewAbort?.abort()
   previewAbort = null
+  // Blob URL も解放 (memory leak 防止)
+  releaseBlobUrl()
 })
 </script>
 
@@ -492,9 +512,9 @@ onUnmounted(() => {
             {{ recomputing ? '実行中…' : '🔄 redact 開始' }}
           </button>
         </div>
-        <ClientOnly v-else-if="previewPdfData">
+        <ClientOnly v-else-if="previewPdfSource">
           <VuePdfEmbed
-            :source="previewPdfData"
+            :source="previewPdfSource"
             class="bg-gray-50 rounded border max-h-[600px] overflow-y-auto"
             @loaded="onPdfLoaded"
             @loading-failed="onPdfError"
