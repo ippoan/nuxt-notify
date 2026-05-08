@@ -1,0 +1,37 @@
+name = "notify-realtime-bus"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+account_id = "24b45709d060d957340180e995f0d373"
+
+# 本番ルート: realtime.notify.ippoan.org
+# rust-alc-api (NOTIFY_REDACT_BROADCAST_URL) → /broadcast
+# admin ブラウザ (Sec-WebSocket-Protocol JWT) → /subscribe
+routes = [
+  { pattern = "realtime.notify.ippoan.org", custom_domain = true }
+]
+
+[durable_objects]
+bindings = [
+  { name = "REDACT_BUS", class_name = "RedactBus" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RedactBus"]
+
+# 必須 secret (デプロイ前に投入):
+#   wrangler secret put JWT_SECRET                        # rust-alc-api と同値
+#   wrangler secret put NOTIFY_REDACT_BROADCAST_SECRET    # rust-alc-api と同値
+#   wrangler secret put JWT_SECRET --env staging
+#   wrangler secret put NOTIFY_REDACT_BROADCAST_SECRET --env staging
+
+[env.staging]
+name = "notify-realtime-bus-staging"
+routes = [
+  { pattern = "realtime.notify-staging.ippoan.org", custom_domain = true }
+]
+
+[env.staging.durable_objects]
+bindings = [
+  { name = "REDACT_BUS", class_name = "RedactBus" }
+]

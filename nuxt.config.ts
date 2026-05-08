@@ -14,6 +14,10 @@ export default defineNuxtConfig({
       apiBase: 'http://localhost:8080',
       authWorkerUrl: 'https://auth.ippoan.org',
       stagingTenantId: '',
+      // notify-realtime-bus Worker (DurableObject + hibernated WS) の URL。
+      // 未設定なら useRedactionWatch は no-op (既存 polling が UI 更新を担う)。
+      // 本番: wss://realtime.notify.ippoan.org / staging: wss://realtime.notify-staging.ippoan.org
+      realtimeBusUrl: '',
     },
   },
 
