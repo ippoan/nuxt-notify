@@ -83,6 +83,9 @@ const previewMode = ref<'redacted' | 'original'>('redacted')
 // が発生する。Blob URL 経由にすると、PDF.js が内部で URL から fetch するので
 // 各ロードで独立 ArrayBuffer が割り当てられ、main thread 上の参照は無関係になる。
 const previewPdfSource = ref<string | null>(null)
+// 画像プレビュー (Content-Type が image/* のとき): rust-alc-api PR #327 以降の
+// redacted は JPEG 1 枚 (PDF wrap 廃止) で返ってくるので <img> で表示する。
+const previewImageUrl = ref<string | null>(null)
 const previewLoading = ref(false)
 const previewError = ref('')
 const pdfPages = ref(0)
@@ -243,8 +246,8 @@ async function loadPreview() {
   const ctrl = new AbortController()
   previewAbort = ctrl
   // 旧 source を即座に外し、旧 Blob URL を解放 (memory leak 防止)。
-  // VuePdfEmbed は source=null で内部 PDF document も unload してくれる。
   previewPdfSource.value = null
+  previewImageUrl.value = null
   releaseBlobUrl()
   previewLoading.value = true
   previewError.value = ''
@@ -259,26 +262,36 @@ async function loadPreview() {
       headers['X-Tenant-ID'] = orgId.value
     }
     const qs = previewMode.value === 'original' ? '?original=true' : ''
-    // VuePdfEmbed は string URL で fetch すると認証ヘッダを付けられない。
-    // 認証付きで bytes を取得 → Blob にして Object URL を作り、source に渡す。
-    // pdfjs-dist は URL を内部で fetch するので独立 ArrayBuffer が割り当てられ、
-    // main thread 上の他参照とは完全に分離される (= Worker transfer による detach
-    // race が構造的に発生しなくなる)。
-    const bytes = await fetchPdfBytes(
+    // 認証付きで preview を取得。Content-Type で PDF / 画像を分岐:
+    //   - application/pdf → VuePdfEmbed (PDF.js)
+    //   - image/jpeg, image/png, etc. → <img> (rust-alc-api PR #327 以降の
+    //     redacted は JPEG 1 枚で配信される)
+    const res = await fetch(
       `${apiBase}/api/notify/documents/${document.value.id}/preview${qs}`,
       { headers, signal: ctrl.signal },
     )
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     if (ctrl.signal.aborted) return
-    // TS 5.x で Uint8Array が generic 化され、`Uint8Array<ArrayBufferLike>` は
-    // `BlobPart` (= ArrayBufferView<ArrayBuffer>) に直接代入できない。
-    // BlobPart にキャストして渡す (実体は同じバイト列)。
-    const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
-    previewBlobUrl = URL.createObjectURL(blob)
-    previewPdfSource.value = previewBlobUrl
+    const ctype = (res.headers.get('content-type') ?? '').toLowerCase()
+    const buf = await res.arrayBuffer()
+    if (ctrl.signal.aborted) return
+    if (ctype.startsWith('image/')) {
+      // JPEG / PNG: <img> で直接表示
+      const blob = new Blob([buf], { type: ctype })
+      previewBlobUrl = URL.createObjectURL(blob)
+      previewImageUrl.value = previewBlobUrl
+    }
+    else {
+      // PDF: VuePdfEmbed が独立 ArrayBuffer で fetch できるよう Blob URL に置く。
+      const blob = new Blob([buf], { type: 'application/pdf' })
+      previewBlobUrl = URL.createObjectURL(blob)
+      previewPdfSource.value = previewBlobUrl
+    }
   } catch (e: any) {
     if (e?.name === 'AbortError' || ctrl.signal.aborted) return
     previewError.value = e.message || String(e)
     previewPdfSource.value = null
+    previewImageUrl.value = null
     releaseBlobUrl()
   } finally {
     if (previewAbort === ctrl) {
@@ -737,6 +750,12 @@ onUnmounted(() => {
                   class="mt-3 text-sm bg-amber-100 text-amber-800 hover:bg-amber-200 px-4 py-2 rounded disabled:opacity-50">
             {{ recomputing ? '実行中…' : '🔄 redact 開始' }}
           </button>
+        </div>
+        <div v-else-if="previewImageUrl"
+             class="bg-gray-50 rounded border overflow-auto">
+          <img :src="previewImageUrl"
+               :alt="document.file_name ?? 'preview'"
+               class="block max-w-full h-auto mx-auto" />
         </div>
         <ClientOnly v-else-if="previewPdfSource">
           <VuePdfEmbed
