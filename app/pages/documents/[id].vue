@@ -189,7 +189,10 @@ async function loadPreview() {
       { headers, signal: ctrl.signal },
     )
     if (ctrl.signal.aborted) return
-    const blob = new Blob([bytes], { type: 'application/pdf' })
+    // TS 5.x で Uint8Array が generic 化され、`Uint8Array<ArrayBufferLike>` は
+    // `BlobPart` (= ArrayBufferView<ArrayBuffer>) に直接代入できない。
+    // BlobPart にキャストして渡す (実体は同じバイト列)。
+    const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
     previewBlobUrl = URL.createObjectURL(blob)
     previewPdfSource.value = previewBlobUrl
   } catch (e: any) {
