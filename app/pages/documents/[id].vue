@@ -10,6 +10,14 @@ const { onUpdate: onRedactUpdate } = useRedactionWatch()
 
 const documentId = computed(() => String(route.params.id))
 
+interface LogisticsFields {
+  loading_place?: string | null
+  unloading_place?: string | null
+  loading_at?: string | null
+  unloading_at?: string | null
+  notes?: string | null
+}
+
 interface NotifyDocument {
   id: string
   email_message_id: string | null
@@ -17,7 +25,9 @@ interface NotifyDocument {
   file_size_bytes: number | null
   extracted_title: string | null
   extracted_summary: string | null
+  extracted_data: { logistics?: LogisticsFields | null } | Record<string, unknown> | null
   extraction_status: string
+  extraction_error: string | null
   distribution_status: string
   // redact パイプライン (migration 109、PR rust-alc-api#314)
   redaction_status: string
@@ -68,6 +78,8 @@ const pdfPages = ref(0)
 
 // 再 redact 実行中フラグ + ポーリング制御
 const recomputing = ref(false)
+// 物流情報の再抽出フラグ (redact とは別)
+const recomputingExtract = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 // 進行中の preview fetch を中断するための controller。
@@ -86,6 +98,41 @@ function releaseBlobUrl() {
 const isPdf = computed(() => {
   const name = document.value?.file_name?.toLowerCase() ?? ''
   return name.endsWith('.pdf')
+})
+
+/**
+ * 配車手配票から抽出した 5 フィールド (積地・卸地・積み日時・卸し日時・注意事項)。
+ * バックエンドの `crates/alc-notify/src/extract.rs::LogisticsFields` と対応。
+ * `extracted_data.logistics` が object のときのみ取り出す。
+ */
+const logisticsFields = computed<LogisticsFields | null>(() => {
+  const d = document.value?.extracted_data
+  if (!d || typeof d !== 'object') return null
+  const l = (d as { logistics?: LogisticsFields | null }).logistics
+  if (!l || typeof l !== 'object') return null
+  return l
+})
+
+/**
+ * 5 フィールドのうち 1 つでも非空なら true。
+ * extract が完了して logistics データが揃ったかの UI 表示判定に使う。
+ */
+const hasLogistics = computed(() => {
+  const l = logisticsFields.value
+  if (!l) return false
+  return [l.loading_place, l.unloading_place, l.loading_at, l.unloading_at, l.notes].some(
+    (v) => typeof v === 'string' && v.trim().length > 0,
+  )
+})
+
+/**
+ * extract が「処理中」と見なせる状態。pending = まだ background が触っていない、
+ * もしくは ingest 直後のデフォルト値。`completed` で logistics なしも有り得る (PDF 以外
+ * や配車手配票でない PDF) ので、status だけで「抽出済み」を判定しない。
+ */
+const isExtractInProgress = computed(() => {
+  const s = document.value?.extraction_status
+  return s === 'pending' || s === 'processing'
 })
 
 // 配信は redact 完了 / skipped (PDF以外) のみ許可。
@@ -134,8 +181,13 @@ function schedulePollIfProcessing() {
     clearTimeout(pollTimer)
     pollTimer = null
   }
-  const s = document.value?.redaction_status
-  if (s === 'processing' || s === 'pending') {
+  // redact 処理中 / extract 処理中 のいずれかなら polling 続行。
+  // どちらか先に完走しても、もう片方を見るために残り時間 polling する。
+  const redS = document.value?.redaction_status
+  const extS = document.value?.extraction_status
+  const redactPending = redS === 'processing' || redS === 'pending'
+  const extractPending = extS === 'processing' || extS === 'pending'
+  if (redactPending || extractPending) {
     pollTimer = setTimeout(() => {
       // silent reload (loading フラグは触らない、UI ちらつき防止)
       apiFetch<DocumentResponse>(`/notify/documents/${documentId.value}`)
@@ -231,6 +283,26 @@ async function recomputeRedaction() {
     alert(`再 redact 失敗: ${e.message ?? e}`)
   } finally {
     recomputing.value = false
+  }
+}
+
+/**
+ * Gemini で `extracted_data.logistics` を再抽出する。
+ * バック (`POST /notify/documents/{id}/extract-recompute`) は async で 202 Accepted を返し、
+ * ジョブ完走時に extraction_status を completed/failed に書き換える。UI は polling で追う。
+ */
+async function recomputeExtract() {
+  if (!document.value || recomputingExtract.value) return
+  recomputingExtract.value = true
+  try {
+    await apiFetch(`/notify/documents/${document.value.id}/extract-recompute`, { method: 'POST' })
+    // 即座に pending に倒して polling 開始 (バック側は async)
+    if (document.value) document.value.extraction_status = 'pending'
+    schedulePollIfProcessing()
+  } catch (e: any) {
+    alert(`運送情報の抽出やり直しに失敗: ${e.message ?? e}`)
+  } finally {
+    recomputingExtract.value = false
   }
 }
 
@@ -444,6 +516,79 @@ onUnmounted(() => {
           </div>
           <div v-if="document.extracted_summary" class="mt-1 text-gray-600 whitespace-pre-wrap">
             {{ document.extracted_summary }}
+          </div>
+        </div>
+
+        <!-- 運送情報 (配車手配票 PDF から Gemini で抽出した 5 フィールド) -->
+        <!-- LINE 配信本文に列挙される。配信前にここで内容確認 + 必要なら抽出やり直し可能 -->
+        <div v-if="hasLogistics" class="mt-3 pt-3 border-t">
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-sm font-semibold text-blue-800">📦 運送情報</h4>
+            <button @click="recomputeExtract"
+                    :disabled="recomputingExtract"
+                    class="text-xs text-blue-600 hover:underline disabled:opacity-50">
+              {{ recomputingExtract ? '抽出中…' : '抽出やり直し' }}
+            </button>
+          </div>
+          <p class="text-xs text-gray-500 mb-2">
+            この情報が LINE 配信時に本文へ載ります
+          </p>
+          <dl class="grid grid-cols-[7em_1fr] gap-y-1 text-sm">
+            <template v-if="logisticsFields?.loading_place">
+              <dt class="text-gray-500">📍 積地</dt>
+              <dd class="text-gray-900">{{ logisticsFields.loading_place }}</dd>
+            </template>
+            <template v-if="logisticsFields?.unloading_place">
+              <dt class="text-gray-500">📦 卸地</dt>
+              <dd class="text-gray-900">{{ logisticsFields.unloading_place }}</dd>
+            </template>
+            <template v-if="logisticsFields?.loading_at">
+              <dt class="text-gray-500">🕐 積込</dt>
+              <dd class="text-gray-900">{{ logisticsFields.loading_at }}</dd>
+            </template>
+            <template v-if="logisticsFields?.unloading_at">
+              <dt class="text-gray-500">🕓 卸し</dt>
+              <dd class="text-gray-900">{{ logisticsFields.unloading_at }}</dd>
+            </template>
+            <template v-if="logisticsFields?.notes">
+              <dt class="text-gray-500">⚠️ 注意</dt>
+              <dd class="text-gray-900 whitespace-pre-wrap">{{ logisticsFields.notes }}</dd>
+            </template>
+          </dl>
+        </div>
+
+        <!-- extract 処理中: 配車 PDF だが logistics がまだ書かれていない -->
+        <div v-else-if="isPdf && isExtractInProgress" class="mt-3 pt-3 border-t">
+          <div class="text-sm text-gray-500">
+            🔍 運送情報を抽出中…
+          </div>
+        </div>
+
+        <!-- extract 完了したが logistics なし (配車手配票でなかった、または Gemini が判定外) -->
+        <div v-else-if="isPdf && document.extraction_status === 'completed'" class="mt-3 pt-3 border-t">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-400">運送情報なし (配車手配票ではないか抽出未対応)</span>
+            <button @click="recomputeExtract"
+                    :disabled="recomputingExtract"
+                    class="text-xs text-blue-600 hover:underline disabled:opacity-50">
+              {{ recomputingExtract ? '抽出中…' : '抽出やり直し' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- extract 失敗 -->
+        <div v-else-if="document.extraction_status === 'failed'"
+             class="mt-3 pt-3 border-t text-xs bg-red-50 border-red-200 text-red-800 px-3 py-2 rounded">
+          <div class="flex items-center justify-between">
+            <span class="font-medium">運送情報の抽出に失敗しました</span>
+            <button @click="recomputeExtract"
+                    :disabled="recomputingExtract"
+                    class="text-xs underline hover:no-underline">
+              {{ recomputingExtract ? '抽出中…' : '再試行' }}
+            </button>
+          </div>
+          <div v-if="document.extraction_error" class="mt-1 font-mono break-all">
+            {{ document.extraction_error }}
           </div>
         </div>
       </div>
