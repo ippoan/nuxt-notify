@@ -16,4 +16,16 @@ export default defineNuxtConfig({
       stagingTenantId: '',
     },
   },
+
+  vite: {
+    server: {
+      // wt-quick (cloudflared trycloudflare.com) 経由のアクセスを許可
+      allowedHosts: ['.trycloudflare.com'],
+    },
+    optimizeDeps: {
+      // @ippoan/auth-client を Vite pre-bundle すると useRuntimeConfig 等の
+      // 重複 import で不正 JS になる。除外して通常 ESM 解決に任せる。
+      exclude: ['@ippoan/auth-client'],
+    },
+  },
 })
