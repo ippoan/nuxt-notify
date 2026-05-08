@@ -29,13 +29,18 @@ const pdfLoaded = ref(false)
 const pdfPages = ref(0)
 const pdfError = ref('')
 
+// 実体の content-type (HEAD で取得)。原本ファイル名は `.pdf` でも redacted の
+// 実ファイルが `.jpg` (rust-alc-api PR #327 以降) のケースに対応するため、
+// ファイル名ではなくレスポンスヘッダで判断する。
+const fileContentType = ref<string | null>(null)
+
 const isPdf = computed(() => {
-  const name = meta.value?.file_name ?? ''
-  return name.toLowerCase().endsWith('.pdf')
+  const ct = fileContentType.value ?? ''
+  return ct.startsWith('application/pdf')
 })
 const isImage = computed(() => {
-  const name = meta.value?.file_name?.toLowerCase() ?? ''
-  return /\.(png|jpe?g|gif|webp|svg)$/.test(name)
+  const ct = fileContentType.value ?? ''
+  return ct.startsWith('image/')
 })
 
 function formatSize(bytes: number | null): string {
@@ -60,6 +65,17 @@ async function load() {
     if (res.status === 404) { status.value = 'not_found'; return }
     if (!res.ok) { status.value = 'error'; return }
     meta.value = await res.json()
+    // 並行で実体の Content-Type を HEAD で取る (PDF / JPEG 切替判定)。
+    // HEAD が失敗したり Content-Type が不明だったら fileContentType=null のまま
+    // → 「ファイルを開く」ボタン (default ブランチ) に倒す。
+    try {
+      const head = await fetch(fileUrl.value, { method: 'HEAD' })
+      if (head.ok) {
+        fileContentType.value = head.headers.get('content-type')?.toLowerCase() ?? null
+      }
+    } catch {
+      // ignore — fallback to file-name based detection はしない (古い情報の方が有害)
+    }
     status.value = 'ok'
   } catch {
     status.value = 'error'
