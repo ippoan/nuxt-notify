@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const { apiFetch } = useApi()
+const { onUpdate: onRedactUpdate } = useRedactionWatch()
 
 interface NotifyDocument {
   id: string
@@ -114,6 +115,17 @@ async function bulkRecompute() {
 }
 
 onMounted(reload)
+
+// notify-realtime-bus からの terminal status push を受信したら一覧の該当行を patch。
+// 一覧は polling していないので、これが無いと UI が古いまま (要手動 reload)。
+onRedactUpdate((ev) => {
+  const doc = documents.value.find((d) => d.id === ev.document_id)
+  if (!doc) return
+  doc.redaction_status = ev.status
+  if (typeof ev.redactions_applied === 'number') {
+    doc.redactions_applied = ev.redactions_applied
+  }
+})
 
 function extractionBadge(status: string): { label: string; cls: string } {
   switch (status) {

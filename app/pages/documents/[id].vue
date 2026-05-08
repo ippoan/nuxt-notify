@@ -5,6 +5,7 @@ import VuePdfEmbed from 'vue-pdf-embed'
 const route = useRoute()
 const { apiFetch } = useApi()
 const { token, orgId } = useAuth()
+const { onUpdate: onRedactUpdate } = useRedactionWatch()
 
 const documentId = computed(() => String(route.params.id))
 
@@ -294,6 +295,24 @@ onMounted(async () => {
     if (s === 'completed' || s === 'skipped') {
       loadPreview()
     }
+  }
+})
+
+// notify-realtime-bus からの terminal status push を受信したら現在のドキュメントを patch。
+// polling は引き続き動かす (Phase 3 デプロイ前の旧環境互換 + WS 切断時のフォールバック)。
+onRedactUpdate((ev) => {
+  if (ev.document_id !== documentId.value) return
+  if (!document.value) return
+  document.value.redaction_status = ev.status
+  if (typeof ev.redactions_applied === 'number') {
+    document.value.redactions_applied = ev.redactions_applied
+  }
+  if (ev.redaction_error) {
+    document.value.redaction_error = ev.redaction_error
+  }
+  // completed になったらプレビューを再ロード
+  if (ev.status === 'completed' && isPdf.value && !previewPdfData.value) {
+    loadPreview()
   }
 })
 
