@@ -16,6 +16,10 @@ interface LogisticsFields {
   loading_at?: string | null
   unloading_at?: string | null
   notes?: string | null
+  // 連絡先 3 フィールド (相手先のみ、自社は extract.rs 側で除外済)
+  contact_company?: string | null
+  contact_person?: string | null
+  contact_phone?: string | null
 }
 
 interface NotifyDocument {
@@ -101,9 +105,13 @@ const isPdf = computed(() => {
 })
 
 /**
- * 配車手配票から抽出した 5 フィールド (積地・卸地・積み日時・卸し日時・注意事項)。
+ * 配車手配票から抽出した 8 フィールド
+ * (積地・卸地・積み日時・卸し日時・注意事項・連絡先会社名・担当者・電話番号)。
  * バックエンドの `crates/alc-notify/src/extract.rs::LogisticsFields` と対応。
  * `extracted_data.logistics` が object のときのみ取り出す。
+ *
+ * 連絡先 3 フィールドは「相手先 (依頼元・お客様)」のみ抽出される。自社情報は
+ * tenants.name を Gemini プロンプトに渡して除外している。
  */
 const logisticsFields = computed<LogisticsFields | null>(() => {
   const d = document.value?.extracted_data
@@ -114,15 +122,22 @@ const logisticsFields = computed<LogisticsFields | null>(() => {
 })
 
 /**
- * 5 フィールドのうち 1 つでも非空なら true。
+ * 8 フィールドのうち 1 つでも非空なら true。
  * extract が完了して logistics データが揃ったかの UI 表示判定に使う。
  */
 const hasLogistics = computed(() => {
   const l = logisticsFields.value
   if (!l) return false
-  return [l.loading_place, l.unloading_place, l.loading_at, l.unloading_at, l.notes].some(
-    (v) => typeof v === 'string' && v.trim().length > 0,
-  )
+  return [
+    l.loading_place,
+    l.unloading_place,
+    l.loading_at,
+    l.unloading_at,
+    l.notes,
+    l.contact_company,
+    l.contact_person,
+    l.contact_phone,
+  ].some((v) => typeof v === 'string' && v.trim().length > 0)
 })
 
 /**
@@ -553,6 +568,24 @@ onUnmounted(() => {
             <template v-if="logisticsFields?.notes">
               <dt class="text-gray-500">⚠️ 注意</dt>
               <dd class="text-gray-900 whitespace-pre-wrap">{{ logisticsFields.notes }}</dd>
+            </template>
+            <!-- 連絡先 3 フィールド (相手先のみ、自社は extract 側で除外済) -->
+            <template v-if="logisticsFields?.contact_company">
+              <dt class="text-gray-500">🏢 連絡先</dt>
+              <dd class="text-gray-900">{{ logisticsFields.contact_company }}</dd>
+            </template>
+            <template v-if="logisticsFields?.contact_person">
+              <dt class="text-gray-500">👤 担当</dt>
+              <dd class="text-gray-900">{{ logisticsFields.contact_person }}</dd>
+            </template>
+            <template v-if="logisticsFields?.contact_phone">
+              <dt class="text-gray-500">📞 電話</dt>
+              <dd class="text-gray-900">
+                <a :href="`tel:${logisticsFields.contact_phone}`"
+                   class="text-blue-600 hover:underline">
+                  {{ logisticsFields.contact_phone }}
+                </a>
+              </dd>
             </template>
           </dl>
         </div>
