@@ -518,7 +518,7 @@ onUnmounted(() => {
         <ClientOnly v-else-if="previewPdfSource">
           <VuePdfEmbed
             :source="previewPdfSource"
-            class="bg-gray-50 rounded border max-h-[600px] overflow-y-auto"
+            class="bg-gray-50 rounded border"
             @loaded="onPdfLoaded"
             @loading-failed="onPdfError"
           />
