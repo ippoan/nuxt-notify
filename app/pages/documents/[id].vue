@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useAuth } from '@ippoan/auth-client'
 import VuePdfEmbed from 'vue-pdf-embed'
+import { fetchPdfBytes } from '~/utils/preview-fetch'
 
 const route = useRoute()
 const { apiFetch } = useApi()
@@ -62,6 +63,14 @@ const pdfPages = ref(0)
 // 再 redact 実行中フラグ + ポーリング制御
 const recomputing = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+// 進行中の preview fetch を中断するための controller。
+// tab 切替 (switchPreview) / WS event (onRedactUpdate) / 再 redact 完了 polling が
+// 並行に loadPreview() を呼ぶと、PDF.js Worker がまだ前の Uint8Array を処理中に
+// 新しい代入が走り、Worker への postMessage 時に「ArrayBuffer at index 0 is
+// already detached」が発生する。常に直前の fetch を abort + buffer を独立 copy
+// (buf.slice(0)) することで、Worker 委譲済 buffer と main thread の ref を切り離す。
+let previewAbort: AbortController | null = null
 
 const isPdf = computed(() => {
   const name = document.value?.file_name?.toLowerCase() ?? ''
@@ -137,6 +146,13 @@ function schedulePollIfProcessing() {
 
 async function loadPreview() {
   if (!document.value || !isPdf.value) return
+  // 直前の fetch があれば abort。古い ArrayBuffer が Worker に渡る前の段階で
+  // 切り捨てる (Worker 委譲後はこちらでキャンセルできないため、network 段で止める)。
+  previewAbort?.abort()
+  const ctrl = new AbortController()
+  previewAbort = ctrl
+  // 旧 buffer の参照を即座に外す。VuePdfEmbed が前 buffer を破棄できる猶予を作る。
+  previewPdfData.value = null
   previewLoading.value = true
   previewError.value = ''
   pdfPages.value = 0
@@ -152,15 +168,23 @@ async function loadPreview() {
     const qs = previewMode.value === 'original' ? '?original=true' : ''
     // VuePdfEmbed は string URL で fetch すると認証ヘッダを付けられない。
     // 認証付きで bytes を取得して Uint8Array で渡す (PDF.js が直接受け取れる形)。
-    const res = await fetch(`${apiBase}/api/notify/documents/${document.value.id}/preview${qs}`, { headers })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const buf = await res.arrayBuffer()
-    previewPdfData.value = new Uint8Array(buf)
+    // fetchPdfBytes は内部で buf.slice(0) して独立 ArrayBuffer を返すため、
+    // PDF.js Worker への transfer が main thread 側 ref を detach しない。
+    const bytes = await fetchPdfBytes(
+      `${apiBase}/api/notify/documents/${document.value.id}/preview${qs}`,
+      { headers, signal: ctrl.signal },
+    )
+    if (ctrl.signal.aborted) return
+    previewPdfData.value = bytes
   } catch (e: any) {
+    if (e?.name === 'AbortError' || ctrl.signal.aborted) return
     previewError.value = e.message || String(e)
     previewPdfData.value = null
   } finally {
-    previewLoading.value = false
+    if (previewAbort === ctrl) {
+      previewLoading.value = false
+      previewAbort = null
+    }
   }
 }
 
@@ -321,6 +345,9 @@ onUnmounted(() => {
     clearTimeout(pollTimer)
     pollTimer = null
   }
+  // 進行中の preview fetch があれば abort。leak した Worker 通信を絶つ。
+  previewAbort?.abort()
+  previewAbort = null
 })
 </script>
 
