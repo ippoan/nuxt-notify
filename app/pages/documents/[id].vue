@@ -12,16 +12,18 @@ const documentId = computed(() => String(route.params.id))
 
 interface LogisticsFields {
   loading_place?: string | null
-  // 積地に住所と電話が併記されている時のサブ情報 (rust-alc-api#321)
+  // 積地に住所/電話/担当が併記されている時のサブ情報 (rust-alc-api#321 + #322)
   loading_place_address?: string | null
   loading_place_phone?: string | null
+  loading_place_person?: string | null
   unloading_place?: string | null
   unloading_place_address?: string | null
   unloading_place_phone?: string | null
+  unloading_place_person?: string | null
   loading_at?: string | null
   unloading_at?: string | null
   notes?: string | null
-  // 連絡先 3 フィールド (相手先のみ、自社は extract.rs 側で除外済)
+  // 連絡先 3 フィールド (相手先 = 依頼元のみ、自社は extract.rs 側で除外済)
   contact_company?: string | null
   contact_person?: string | null
   contact_phone?: string | null
@@ -137,9 +139,11 @@ const hasLogistics = computed(() => {
     l.loading_place,
     l.loading_place_address,
     l.loading_place_phone,
+    l.loading_place_person,
     l.unloading_place,
     l.unloading_place_address,
     l.unloading_place_phone,
+    l.unloading_place_person,
     l.loading_at,
     l.unloading_at,
     l.notes,
@@ -558,13 +562,16 @@ onUnmounted(() => {
             この情報が LINE 配信時に本文へ載ります
           </p>
           <dl class="grid grid-cols-[7em_1fr] gap-y-1 text-sm">
-            <!-- 積地: 名前 + 住所 + 電話を縦に積む (PDF の表現と同じ並び) -->
-            <template v-if="logisticsFields?.loading_place || logisticsFields?.loading_place_address || logisticsFields?.loading_place_phone">
+            <!-- 積地: 名前 + 住所 + 担当 + 電話を縦に積む (PDF の表現と同じ並び) -->
+            <template v-if="logisticsFields?.loading_place || logisticsFields?.loading_place_address || logisticsFields?.loading_place_phone || logisticsFields?.loading_place_person">
               <dt class="text-gray-500">📍 積地</dt>
               <dd class="text-gray-900">
                 <div v-if="logisticsFields?.loading_place">{{ logisticsFields.loading_place }}</div>
                 <div v-if="logisticsFields?.loading_place_address" class="text-xs text-gray-600">
                   {{ logisticsFields.loading_place_address }}
+                </div>
+                <div v-if="logisticsFields?.loading_place_person" class="text-xs">
+                  👤 {{ logisticsFields.loading_place_person }}
                 </div>
                 <div v-if="logisticsFields?.loading_place_phone" class="text-xs">
                   ☎
@@ -575,13 +582,16 @@ onUnmounted(() => {
                 </div>
               </dd>
             </template>
-            <!-- 卸地: 同様に名前 + 住所 + 電話 -->
-            <template v-if="logisticsFields?.unloading_place || logisticsFields?.unloading_place_address || logisticsFields?.unloading_place_phone">
+            <!-- 卸地: 同様に名前 + 住所 + 担当 + 電話 -->
+            <template v-if="logisticsFields?.unloading_place || logisticsFields?.unloading_place_address || logisticsFields?.unloading_place_phone || logisticsFields?.unloading_place_person">
               <dt class="text-gray-500">📦 卸地</dt>
               <dd class="text-gray-900">
                 <div v-if="logisticsFields?.unloading_place">{{ logisticsFields.unloading_place }}</div>
                 <div v-if="logisticsFields?.unloading_place_address" class="text-xs text-gray-600">
                   {{ logisticsFields.unloading_place_address }}
+                </div>
+                <div v-if="logisticsFields?.unloading_place_person" class="text-xs">
+                  👤 {{ logisticsFields.unloading_place_person }}
                 </div>
                 <div v-if="logisticsFields?.unloading_place_phone" class="text-xs">
                   ☎
