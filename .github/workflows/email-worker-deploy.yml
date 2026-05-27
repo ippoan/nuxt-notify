@@ -40,6 +40,9 @@ jobs:
       has_staging_deploy: true
       # wrangler.toml が [[secrets_store_secrets]] を含むので secret-verify を opt-in
       # (Refs ippoan/ci-workflows#50 で wrangler Secrets Store binding 利用時の gate になった)
+      # wrangler_path を明示しないと root の wrangler.jsonc (Nuxt frontend 用、secrets 無し) を
+      # 読んでしまうので、worker の wrangler.toml を直接指定する。
+      wrangler_path: 'workers/email-receiver/wrangler.toml'
       gcp_secret_verify_project: cloudsql-sv
       gcp_secret_verify_provider: ${{ vars.GCP_WIF_PROVIDER }}
       gcp_secret_verify_sa: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_STAGING }}

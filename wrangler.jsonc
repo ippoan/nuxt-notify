@@ -7,6 +7,12 @@
 	"assets": {
 		"directory": ".output/public"
 	},
+	// Nuxt frontend は runtime secret を持たない (config 値は public な NUXT_PUBLIC_*
+	// 環境変数のみ)。ippoan/ci-workflows の secret-verify gate を明示的に pass
+	// させるため、空 list を declare する (Refs ippoan/ci-workflows#50)。
+	"secrets": {
+		"required": []
+	},
 	"env": {
 		"staging": {
 			"name": "nuxt-notify-staging",
