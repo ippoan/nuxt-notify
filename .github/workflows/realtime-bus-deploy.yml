@@ -47,3 +47,43 @@ jobs:
       gcp_secret_verify_provider: ${{ vars.GCP_WIF_PROVIDER }}
       gcp_secret_verify_sa: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_STAGING }}
     secrets: inherit
+
+  # staging deploy 後、realtime-bus の /broadcast endpoint を実際に叩いて
+  # NOTIFY_REDACT_BROADCAST_SECRET_STAGING が CF Secrets Store binding 経由で
+  # 正しく注入されているかを確認する smoke test。
+  #
+  # 401 が返れば secret 不一致 (= GCP / CF Secrets Store / Worker binding のどこかで drift)。
+  # 200 / 204 が返れば auth 通過、CF Secrets Store の値で OK と判定する。
+  # subscribe している admin WS が 0 件でも broadcast 自体は no-op で成功する。
+  smoke-staging-broadcast:
+    name: Smoke /broadcast on staging
+    needs: ci
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /broadcast with NOTIFY_REDACT_BROADCAST_SECRET_STAGING
+        env:
+          SECRET: ${{ secrets.NOTIFY_REDACT_BROADCAST_SECRET_STAGING }}
+        run: |
+          set -eu
+          if [ -z "${SECRET:-}" ]; then
+            echo "::error::NOTIFY_REDACT_BROADCAST_SECRET_STAGING is empty — check org secret sync (secrets-inventory sync-from-gcp ... ?targets=gh)"
+            exit 1
+          fi
+          http=$(curl -sS -o /tmp/body -w "%{http_code}" -X POST \
+            "https://realtime.notify-staging.ippoan.org/broadcast" \
+            -H "X-Broadcast-Secret: $SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary '{"tenant_id":"00000000-0000-0000-0000-000000000000","document_id":"ci-smoke","status":"completed"}')
+          echo "HTTP $http"
+          head -c 500 /tmp/body || true
+          echo
+          if [ "$http" = "401" ]; then
+            echo "::error::auth failed — NOTIFY_REDACT_BROADCAST_SECRET_STAGING in this repo does not match the value bound to realtime-bus (CF Secrets Store: notify-redact-broadcast-secret-staging). Check secrets-inventory get_drift."
+            exit 1
+          fi
+          if [ "$http" -lt 200 ] || [ "$http" -ge 400 ]; then
+            echo "::error::unexpected HTTP $http"
+            exit 1
+          fi
+          echo "::notice::broadcast accepted (HTTP $http) — secret OK"
