@@ -21,9 +21,18 @@ new_classes = ["RedactBus"]
 
 # 必須 secret (デプロイ前に投入):
 #   wrangler secret put JWT_SECRET                        # rust-alc-api と同値
-#   wrangler secret put NOTIFY_REDACT_BROADCAST_SECRET    # rust-alc-api と同値
 #   wrangler secret put JWT_SECRET --env staging
-#   wrangler secret put NOTIFY_REDACT_BROADCAST_SECRET --env staging
+#
+# NOTIFY_REDACT_BROADCAST_SECRET は CF Secrets Store binding 経由
+# (Refs ippoan/rust-alc-api#354)。値の更新は GCP Secret Manager に投入 →
+# secrets-inventory が CF に伝播。`wrangler secret put` は使わない
+# (= per-worker env var だと secrets-inventory get_drift から見えない
+# false negative リスクがあるため)。
+
+[[secrets_store_secrets]]
+binding = "NOTIFY_REDACT_BROADCAST_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "notify-redact-broadcast-secret"
 
 [env.staging]
 name = "notify-realtime-bus-staging"
@@ -35,3 +44,8 @@ routes = [
 bindings = [
   { name = "REDACT_BUS", class_name = "RedactBus" }
 ]
+
+[[env.staging.secrets_store_secrets]]
+binding = "NOTIFY_REDACT_BROADCAST_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "notify-redact-broadcast-secret-staging"

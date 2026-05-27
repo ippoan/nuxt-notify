@@ -18,9 +18,20 @@ head_sampling_rate = 1.0
 # tenant 識別は body の `tenant_slug` で backend が `tenants.slug` から解決する。
 # 認証は shared secret (NOTIFY_WORKER_SECRET) で経路保護のみ。
 #
-# 必須 secret (デプロイ前に投入):
-#   wrangler secret put NOTIFY_WORKER_SECRET           # prod 値 (Secret Manager: notify-worker-secret)
-#   wrangler secret put NOTIFY_WORKER_SECRET_STAGING   # staging 値 (Secret Manager: notify-worker-secret-staging)
+# secret は CF Secrets Store binding 経由で配布される (Refs ippoan/rust-alc-api#354)。
+# 値の更新は GCP Secret Manager に投入 → secrets-inventory が CF に伝播。
+# `wrangler secret put` は使わない (= per-worker env var だと
+# secrets-inventory get_drift から見えない false negative リスクがあるため)。
+
+[[secrets_store_secrets]]
+binding = "NOTIFY_WORKER_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "notify-worker-secret"
+
+[[secrets_store_secrets]]
+binding = "NOTIFY_WORKER_SECRET_STAGING"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "notify-worker-secret-staging"
 
 [vars]
 INGEST_ENDPOINT = "https://alc-api.ippoan.org/api/notify/ingest"
