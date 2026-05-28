@@ -24,4 +24,8 @@ jobs:
       has_integration: true
       integration_test_command: 'npx vitest run tests/integration/'
       integration_env: 'API_BASE_URL=http://localhost:18080'
+      # Release Wave compatibility: integration test green 時に
+      # 「nuxt-notify が rust-alc-api の現 prod image を相手に test した」ことを
+      # ci-dashboard に記録する (Refs ippoan/ci-dashboard#157)。
+      compat_backend_repo: ippoan/rust-alc-api
     secrets: inherit
