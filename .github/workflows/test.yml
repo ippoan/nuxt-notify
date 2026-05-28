@@ -28,4 +28,8 @@ jobs:
       # 「nuxt-notify が rust-alc-api の現 prod image を相手に test した」ことを
       # ci-dashboard に記録する (Refs ippoan/ci-dashboard#157)。
       compat_backend_repo: ippoan/rust-alc-api
+      # docker-compose.test.yml は ${API_IMAGE:-…:dev} で backend image を読む。
+      # frontend-ci がここに記録対象 SHA (ghcr.io/ippoan/rust-alc-api:<sha>) を
+      # 注入し、test した image == 記録 SHA を保証する (truthful 突合)。
+      compat_backend_image_env: API_IMAGE
     secrets: inherit
