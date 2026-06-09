@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getHiddenIds, hideDocument, unhideDocument } from '~/utils/hiddenDocuments'
+
 const { apiFetch } = useApi()
 const { onUpdate: onRedactUpdate } = useRedactionWatch()
 
@@ -23,6 +25,47 @@ const bulkRunning = ref(false)
 const bulkProgress = ref<{ done: number; total: number } | null>(null)
 // 個別行で実行中の document_id 集合 (二重クリック防止 + ボタン表示)
 const recomputingIds = ref<Set<string>>(new Set())
+// 削除中の document_id 集合 (二重クリック防止)
+const deletingIds = ref<Set<string>>(new Set())
+// 非表示 (localStorage, Refs #70 Option A)。非表示も含めて表示するトグル。
+const hiddenIds = ref<Set<string>>(new Set())
+const showHidden = ref(false)
+
+// showHidden=false のときは非表示 ID を一覧から除外する。
+const visibleDocuments = computed(() =>
+  showHidden.value
+    ? documents.value
+    : documents.value.filter((d) => !hiddenIds.value.has(d.id)),
+)
+// 現在ロード済みドキュメントのうち非表示になっている件数 (トグル表示用)。
+const hiddenCount = computed(
+  () => documents.value.filter((d) => hiddenIds.value.has(d.id)).length,
+)
+
+function toggleHide(doc: NotifyDocument) {
+  hiddenIds.value = hiddenIds.value.has(doc.id)
+    ? unhideDocument(doc.id)
+    : hideDocument(doc.id)
+}
+
+async function deleteOne(doc: NotifyDocument) {
+  if (deletingIds.value.has(doc.id)) return
+  if (!confirm(`「${doc.file_name ?? 'ドキュメント'}」を削除しますか? (R2 + DB から削除)`)) return
+  deletingIds.value = new Set([...deletingIds.value, doc.id])
+  try {
+    await apiFetch(`/notify/documents/${doc.id}`, { method: 'DELETE' })
+    // 楽観的更新: 一覧から除去 (full reload 不要)
+    documents.value = documents.value.filter((d) => d.id !== doc.id)
+    // localStorage 側の非表示エントリも掃除しておく (ゴミ ID を残さない)
+    if (hiddenIds.value.has(doc.id)) hiddenIds.value = unhideDocument(doc.id)
+  } catch (e: any) {
+    alert(`削除失敗: ${e.message ?? e}`)
+  } finally {
+    const next = new Set(deletingIds.value)
+    next.delete(doc.id)
+    deletingIds.value = next
+  }
+}
 
 async function reload() {
   loading.value = true
@@ -114,7 +157,10 @@ async function bulkRecompute() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  hiddenIds.value = getHiddenIds()
+  reload()
+})
 
 // notify-realtime-bus からの terminal status push を受信したら一覧の該当行を patch。
 // 一覧は polling していないので、これが無いと UI が古いまま (要手動 reload)。
@@ -187,6 +233,11 @@ function redactionBadge(doc: NotifyDocument): { label: string; cls: string } | n
     <div class="flex justify-between items-center mb-4 gap-2 flex-wrap">
       <h2 class="text-xl font-bold">ドキュメント一覧</h2>
       <div class="flex items-center gap-2 flex-wrap">
+        <label v-if="hiddenCount > 0 || showHidden"
+               class="flex items-center gap-1 text-sm text-gray-600 select-none cursor-pointer">
+          <input v-model="showHidden" type="checkbox" class="rounded">
+          非表示も表示 ({{ hiddenCount }})
+        </label>
         <button v-if="pendingPdfDocs.length > 0 && !apiNotDeployed"
                 @click="bulkRecompute"
                 :disabled="bulkRunning"
@@ -227,9 +278,14 @@ function redactionBadge(doc: NotifyDocument): { label: string; cls: string } | n
     <div v-else-if="error" class="text-red-500">{{ error }}</div>
     <div v-else-if="documents.length === 0" class="text-gray-400">ドキュメントはまだありません</div>
 
+    <div v-else-if="visibleDocuments.length === 0" class="text-gray-400">
+      表示できるドキュメントはありません<span v-if="hiddenCount > 0"> (全て非表示中)</span>
+    </div>
+
     <div v-else class="space-y-3">
-      <div v-for="doc in documents" :key="doc.id"
-           class="bg-white rounded-lg shadow border hover:bg-gray-50 transition">
+      <div v-for="doc in visibleDocuments" :key="doc.id"
+           :class="['bg-white rounded-lg shadow border hover:bg-gray-50 transition',
+                    hiddenIds.has(doc.id) ? 'opacity-60' : '']">
         <NuxtLink :to="`/documents/${doc.id}`" class="block p-4">
           <div class="flex justify-between items-start gap-3">
             <div class="min-w-0 flex-1">
@@ -254,18 +310,31 @@ function redactionBadge(doc: NotifyDocument): { label: string; cls: string } | n
           </div>
         </NuxtLink>
 
-        <!-- 未処理 PDF は個別 redact 開始ボタンを表示。
-             (undefined / pending / failed の PDF が対象) -->
-        <div v-if="['pending', 'failed', undefined].includes(doc.redaction_status as any)
-                   && (doc.file_name ?? '').toLowerCase().endsWith('.pdf')"
-             class="px-4 pb-3 -mt-1">
-          <button @click="recomputeOne(doc)"
+        <!-- アクション行: 個別 redact (未処理 PDF のみ) + 非表示 + 削除 -->
+        <div class="px-4 pb-3 -mt-1 flex items-center gap-2 flex-wrap">
+          <!-- 未処理 PDF は個別 redact 開始ボタンを表示。
+               (undefined / pending / failed の PDF が対象) -->
+          <button v-if="['pending', 'failed', undefined].includes(doc.redaction_status as any)
+                        && (doc.file_name ?? '').toLowerCase().endsWith('.pdf')"
+                  @click="recomputeOne(doc)"
                   :disabled="recomputingIds.has(doc.id)"
                   class="text-xs bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 px-3 py-1 rounded disabled:opacity-50">
             {{ recomputingIds.has(doc.id) ? '実行中…'
                : doc.redaction_status === 'failed' ? '🔄 redact を再試行'
                : '🔄 redact 開始' }}
           </button>
+
+          <div class="ml-auto flex items-center gap-2">
+            <button @click="toggleHide(doc)"
+                    class="text-xs text-gray-600 hover:bg-gray-100 border border-gray-200 px-3 py-1 rounded">
+              {{ hiddenIds.has(doc.id) ? '👁 再表示' : '🙈 非表示' }}
+            </button>
+            <button @click="deleteOne(doc)"
+                    :disabled="deletingIds.has(doc.id)"
+                    class="text-xs text-red-600 hover:bg-red-50 border border-red-200 px-3 py-1 rounded disabled:opacity-50">
+              {{ deletingIds.has(doc.id) ? '削除中…' : '🗑 削除' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
