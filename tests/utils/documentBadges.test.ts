@@ -161,6 +161,15 @@ describe('buildLogisticsTitle', () => {
     expect(title).toContain('愛知県')
     expect(title).toMatch(/^\d{2}\/\d{2}\s\d{2}:\d{2}\s愛知県$/)
   })
+  it('正規表現にマッチするが無効な日付 (月13) はそのまま raw 文字列', () => {
+    const title = buildLogisticsTitle(
+      docWith({
+        loading_at: '2026-13-40T08:00',
+        loading_place: '愛知県名古屋市',
+      }),
+    )
+    expect(title).toBe('2026-13-40T08:00 愛知県')
+  })
   it('cargo_name (backend 未対応) が無くても route だけで組む', () => {
     const title = buildLogisticsTitle(
       docWith({
