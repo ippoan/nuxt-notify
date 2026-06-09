@@ -8,6 +8,7 @@ import {
   formatDate,
   extractPrefecture,
   buildLogisticsTitle,
+  isExtractionStuck,
   type DocumentCardData,
 } from '../../app/utils/documentBadges'
 
@@ -124,6 +125,38 @@ describe('extractPrefecture', () => {
     expect(extractPrefecture('')).toBeNull()
     expect(extractPrefecture(null)).toBeNull()
     expect(extractPrefecture(undefined)).toBeNull()
+  })
+})
+
+describe('isExtractionStuck', () => {
+  const NOW = Date.parse('2026-05-09T12:00:00Z')
+  const THRESHOLD = 3 * 60 * 1000 // 3 分
+
+  it('pending で updated_at が threshold より古ければ stuck', () => {
+    const old = new Date(NOW - 5 * 60 * 1000).toISOString()
+    expect(isExtractionStuck('pending', old, NOW, THRESHOLD)).toBe(true)
+  })
+  it('processing でも同様に判定する', () => {
+    const old = new Date(NOW - 10 * 60 * 1000).toISOString()
+    expect(isExtractionStuck('processing', old, NOW, THRESHOLD)).toBe(true)
+  })
+  it('threshold 以内なら stuck ではない', () => {
+    const recent = new Date(NOW - 60 * 1000).toISOString()
+    expect(isExtractionStuck('pending', recent, NOW, THRESHOLD)).toBe(false)
+  })
+  it('completed / failed など処理中でなければ常に false', () => {
+    const old = new Date(NOW - 60 * 60 * 1000).toISOString()
+    expect(isExtractionStuck('completed', old, NOW, THRESHOLD)).toBe(false)
+    expect(isExtractionStuck('failed', old, NOW, THRESHOLD)).toBe(false)
+    expect(isExtractionStuck(undefined, old, NOW, THRESHOLD)).toBe(false)
+    expect(isExtractionStuck(null, old, NOW, THRESHOLD)).toBe(false)
+  })
+  it('updated_at が無い (旧 API) と判定不能で false', () => {
+    expect(isExtractionStuck('pending', null, NOW, THRESHOLD)).toBe(false)
+    expect(isExtractionStuck('pending', undefined, NOW, THRESHOLD)).toBe(false)
+  })
+  it('updated_at がパースできない文字列なら false', () => {
+    expect(isExtractionStuck('pending', 'not-a-date', NOW, THRESHOLD)).toBe(false)
   })
 })
 
