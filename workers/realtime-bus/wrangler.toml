@@ -3,6 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2026-04-01"
 account_id = "24b45709d060d957340180e995f0d373"
 
+# Worker のリクエスト/イベントログを Cloudflare Dashboard の Observability タブに保存。
+# /broadcast 到着時刻と DO fan-out 件数を計測するため (Refs #71)。
+# observability は inheritable key なので env.staging にも継承される。
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
 # 本番ルート: realtime.notify.ippoan.org
 # rust-alc-api (NOTIFY_REDACT_BROADCAST_URL) → /broadcast
 # admin ブラウザ (Sec-WebSocket-Protocol JWT) → /subscribe
