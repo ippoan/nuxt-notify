@@ -3,6 +3,7 @@ import {
   extractionBadge,
   distributionBadge,
   redactionBadge,
+  buildLogisticsTitle,
   type BadgeView,
   type DocumentCardData,
 } from '~/utils/documentBadges'
@@ -29,8 +30,14 @@ const props = withDefaults(
   { to: null, dimmed: false },
 )
 
+// 配車手配票の logistics が抽出済みなら「積込日時 積込県ー降し日時 降し県　輸送品名」
+// を優先。無ければ従来どおり extracted_title || file_name にフォールバック (Refs #68)。
 const title = computed(
-  () => props.doc.extracted_title || props.doc.file_name || 'Untitled',
+  () =>
+    buildLogisticsTitle(props.doc) ||
+    props.doc.extracted_title ||
+    props.doc.file_name ||
+    'Untitled',
 )
 const subtitle = computed(
   () => props.doc.extracted_summary || props.doc.source_subject || '',
