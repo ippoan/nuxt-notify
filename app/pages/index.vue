@@ -172,60 +172,6 @@ onRedactUpdate((ev) => {
     doc.redactions_applied = ev.redactions_applied
   }
 })
-
-function extractionBadge(status: string): { label: string; cls: string } {
-  switch (status) {
-    case 'completed':
-      return { label: '抽出済', cls: 'bg-green-100 text-green-700' }
-    case 'failed':
-      return { label: '抽出失敗', cls: 'bg-red-100 text-red-700' }
-    case 'pending':
-      return { label: '抽出待ち', cls: 'bg-yellow-100 text-yellow-700' }
-    default:
-      return { label: status, cls: 'bg-gray-100 text-gray-600' }
-  }
-}
-
-function distributionBadge(status: string): { label: string; cls: string } {
-  switch (status) {
-    case 'completed':
-      return { label: '配信済', cls: 'bg-green-100 text-green-700' }
-    case 'in_progress':
-      return { label: '配信中', cls: 'bg-blue-100 text-blue-700' }
-    case 'failed':
-      return { label: '配信失敗', cls: 'bg-red-100 text-red-700' }
-    default:
-      return { label: '未配信', cls: 'bg-gray-100 text-gray-600' }
-  }
-}
-
-// redaction_status: PDF アップロード時に async で金額マスク (migration 109)。
-// completed / skipped 以外は配信時に backend で 400 ブロックされる。
-// 注: PR #314 が production にデプロイされる前は API が redaction_status を
-//     返さない (undefined) → 「マスク待ち」扱いで PDF にだけバッジ表示する。
-function redactionBadge(doc: NotifyDocument): { label: string; cls: string } | null {
-  const isPdf = (doc.file_name ?? '').toLowerCase().endsWith('.pdf')
-  switch (doc.redaction_status) {
-    case 'completed':
-      return {
-        label: doc.redactions_applied != null ? `🔒 ${doc.redactions_applied}箇所` : '🔒 マスク済',
-        cls: 'bg-emerald-100 text-emerald-700',
-      }
-    case 'processing':
-      return { label: '🔄 マスク処理中', cls: 'bg-blue-100 text-blue-700' }
-    case 'failed':
-      return { label: '⚠️ マスク失敗', cls: 'bg-red-100 text-red-700' }
-    case 'pending':
-      return isPdf ? { label: 'マスク待ち', cls: 'bg-gray-100 text-gray-600' } : null
-    case 'skipped':
-      // PDF 以外は表示しない (ノイズ削減)
-      return null
-    default:
-      // undefined: PR #314 未デプロイの API レスポンス。
-      // PDF だけ「マスク待ち」を出して Phase 3 移行を促す。
-      return isPdf ? { label: 'マスク待ち', cls: 'bg-gray-100 text-gray-600' } : null
-  }
-}
 </script>
 
 <template>
@@ -283,35 +229,11 @@ function redactionBadge(doc: NotifyDocument): { label: string; cls: string } | n
     </div>
 
     <div v-else class="space-y-3">
-      <div v-for="doc in visibleDocuments" :key="doc.id"
-           :class="['bg-white rounded-lg shadow border hover:bg-gray-50 transition',
-                    hiddenIds.has(doc.id) ? 'opacity-60' : '']">
-        <NuxtLink :to="`/documents/${doc.id}`" class="block p-4">
-          <div class="flex justify-between items-start gap-3">
-            <div class="min-w-0 flex-1">
-              <h3 class="font-semibold truncate">{{ doc.extracted_title || doc.file_name || 'Untitled' }}</h3>
-              <p class="text-sm text-gray-500 mt-1 truncate">{{ doc.extracted_summary || doc.source_subject }}</p>
-              <p class="text-xs text-gray-400 mt-1">
-                {{ doc.source_sender }} · {{ new Date(doc.created_at).toLocaleString('ja-JP') }}
-              </p>
-            </div>
-            <div class="flex gap-2 flex-shrink-0 flex-wrap justify-end">
-              <span v-if="redactionBadge(doc)"
-                    :class="['px-2 py-0.5 text-xs rounded-full', redactionBadge(doc)!.cls]">
-                {{ redactionBadge(doc)!.label }}
-              </span>
-              <span :class="['px-2 py-0.5 text-xs rounded-full', extractionBadge(doc.extraction_status).cls]">
-                {{ extractionBadge(doc.extraction_status).label }}
-              </span>
-              <span :class="['px-2 py-0.5 text-xs rounded-full', distributionBadge(doc.distribution_status).cls]">
-                {{ distributionBadge(doc.distribution_status).label }}
-              </span>
-            </div>
-          </div>
-        </NuxtLink>
-
-        <!-- アクション行: 個別 redact (未処理 PDF のみ) + 非表示 + 削除 -->
-        <div class="px-4 pb-3 -mt-1 flex items-center gap-2 flex-wrap">
+      <DocumentCard v-for="doc in visibleDocuments" :key="doc.id"
+                    :doc="doc"
+                    :to="`/documents/${doc.id}`"
+                    :dimmed="hiddenIds.has(doc.id)">
+        <template #actions>
           <!-- 未処理 PDF は個別 redact 開始ボタンを表示。
                (undefined / pending / failed の PDF が対象) -->
           <button v-if="['pending', 'failed', undefined].includes(doc.redaction_status as any)
@@ -335,8 +257,8 @@ function redactionBadge(doc: NotifyDocument): { label: string; cls: string } | n
               {{ deletingIds.has(doc.id) ? '削除中…' : '🗑 削除' }}
             </button>
           </div>
-        </div>
-      </div>
+        </template>
+      </DocumentCard>
     </div>
   </div>
 </template>
