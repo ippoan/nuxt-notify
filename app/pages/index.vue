@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { getHiddenIds, hideDocument, unhideDocument } from '~/utils/hiddenDocuments'
+import type { LogisticsFields } from '~/utils/documentBadges'
 
 const { apiFetch } = useApi()
 const { onUpdate: onRedactUpdate } = useRedactionWatch()
@@ -9,6 +10,9 @@ interface NotifyDocument {
   file_name: string | null
   extracted_title: string | null
   extracted_summary: string | null
+  // 一覧 API (SELECT *) が返す抽出結果。logistics があれば DocumentCard が
+  // 「積込日時 積込県ー降し日時 降し県　輸送品名」タイトルを組み立てる (Refs #68)。
+  extracted_data: { logistics?: LogisticsFields | null } | Record<string, unknown> | null
   source_sender: string | null
   source_subject: string | null
   extraction_status: string
