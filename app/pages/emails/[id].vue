@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAuth } from '@ippoan/auth-client'
+import { formatSize, formatDate, deliveryStatusLabel } from '~/utils/documentBadges'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,37 +124,6 @@ async function deleteDoc(doc: EmailDocument) {
     alert(`削除失敗: ${e.message ?? e}`)
   } finally {
     deleting.value[doc.id] = false
-  }
-}
-
-function formatSize(bytes: number | null): string {
-  if (!bytes) return '-'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function formatDate(s: string | null): string {
-  if (!s) return '-'
-  return new Date(s).toLocaleString('ja-JP', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function deliveryStatusLabel(status: string): { label: string; cls: string } {
-  switch (status) {
-    case 'sent':
-      return { label: '送信済', cls: 'bg-green-100 text-green-700' }
-    case 'failed':
-      return { label: '失敗', cls: 'bg-red-100 text-red-700' }
-    case 'pending':
-      return { label: '未送信', cls: 'bg-gray-100 text-gray-700' }
-    default:
-      return { label: status, cls: 'bg-gray-100 text-gray-700' }
   }
 }
 
