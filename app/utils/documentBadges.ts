@@ -117,6 +117,34 @@ export function formatDate(s: string | null): string {
   })
 }
 
+// ── 抽出 stuck 判定 (Refs #66) ──────────────────────────────────────────
+//
+// backend の extract は fire-and-forget の tokio::spawn で、Cloud Run の CPU
+// throttling 等で background が静かに死ぬと extraction_status が pending の
+// まま永久に止まる。updated_at から一定時間動かなければ stuck とみなし、
+// 詳細画面で再抽出導線を目立たせる判定に使う。updated_at が無い (旧 API) /
+// 不正な値なら判定材料が無いので false にフォールバックする。
+
+/**
+ * 抽出が「処理中表示のまま固まっている」か。
+ * - extraction_status が pending / processing 以外なら常に false
+ * - updated_at が無い / パースできなければ false
+ * - now - updated_at が threshold を超えたら true
+ */
+export function isExtractionStuck(
+  extractionStatus: string | undefined | null,
+  updatedAt: string | null | undefined,
+  nowMs: number,
+  thresholdMs: number,
+): boolean {
+  const inProgress = extractionStatus === 'pending' || extractionStatus === 'processing'
+  if (!inProgress) return false
+  if (!updatedAt) return false
+  const t = new Date(updatedAt).getTime()
+  if (Number.isNaN(t)) return false
+  return nowMs - t > thresholdMs
+}
+
 // ── 配車手配票タイトル組み立て (Refs #68) ───────────────────────────────
 //
 // rust-alc-api の extract.rs が抽出した logistics (extracted_data.logistics)

@@ -2,6 +2,7 @@
 import { useAuth } from '@ippoan/auth-client'
 import VuePdfEmbed from 'vue-pdf-embed'
 import { fetchPdfBytes } from '~/utils/preview-fetch'
+import { isExtractionStuck } from '~/utils/documentBadges'
 
 const route = useRoute()
 const { apiFetch } = useApi()
@@ -47,6 +48,9 @@ interface NotifyDocument {
   redactions_applied: number | null
   redaction_error: string | null
   created_at: string
+  // 状態が最後に書き換わった時刻。extraction が pending/processing のまま
+  // この時刻から一定時間動かなければ「抽出が固まっている」と判定する (Refs #66)。
+  updated_at?: string | null
 }
 
 interface Delivery {
@@ -165,6 +169,28 @@ const isExtractInProgress = computed(() => {
   const s = document.value?.extraction_status
   return s === 'pending' || s === 'processing'
 })
+
+// 抽出が「固まった」と見なすまでの猶予 (Refs #66)。
+// backend の extract は fire-and-forget の tokio::spawn で、Cloud Run の CPU
+// throttling 等で background が静かに死ぬと pending のまま永久に止まる。
+// updated_at からこの時間動かなければ stuck とみなして再抽出導線を出す。
+const EXTRACT_STUCK_AFTER_MS = 3 * 60 * 1000
+
+// 経過時間を再評価させるための tick。polling 中は document.value の差し替えで
+// computed が再評価されるが、polling が止まった場合や同一値が返り続ける場合に
+// 備えて 30 秒ごとに現在時刻を更新する。
+const nowTick = ref(Date.now())
+let stuckTicker: ReturnType<typeof setInterval> | null = null
+
+// 抽出が処理中表示のまま固まっているか (純粋ロジックは documentBadges に集約)。
+const isExtractStuck = computed(() =>
+  isExtractionStuck(
+    document.value?.extraction_status,
+    document.value?.updated_at,
+    nowTick.value,
+    EXTRACT_STUCK_AFTER_MS,
+  ),
+)
 
 // 配信は redact 完了 / skipped (PDF以外) のみ許可。
 // backend (distribute.rs) でも 400 ブロックされるが、UI 側でもボタンを disable する。
@@ -337,8 +363,14 @@ async function recomputeExtract() {
   recomputingExtract.value = true
   try {
     await apiFetch(`/notify/documents/${document.value.id}/extract-recompute`, { method: 'POST' })
-    // 即座に pending に倒して polling 開始 (バック側は async)
-    if (document.value) document.value.extraction_status = 'pending'
+    // 即座に pending に倒して polling 開始 (バック側は async)。
+    // updated_at も now に倒して stuck タイマーをリセット (再キック直後に
+    // 「固まっている」表示が出ないように)。
+    if (document.value) {
+      document.value.extraction_status = 'pending'
+      document.value.updated_at = new Date().toISOString()
+    }
+    nowTick.value = Date.now()
     schedulePollIfProcessing()
   } catch (e: any) {
     alert(`運送情報の抽出やり直しに失敗: ${e.message ?? e}`)
@@ -454,6 +486,10 @@ onMounted(async () => {
       loadPreview()
     }
   }
+  // stuck 判定の経過時間を定期再評価 (Refs #66)。
+  stuckTicker = setInterval(() => {
+    nowTick.value = Date.now()
+  }, 30_000)
 })
 
 // notify-realtime-bus からの terminal status push を受信したら現在のドキュメントを patch。
@@ -478,6 +514,10 @@ onUnmounted(() => {
   if (pollTimer) {
     clearTimeout(pollTimer)
     pollTimer = null
+  }
+  if (stuckTicker) {
+    clearInterval(stuckTicker)
+    stuckTicker = null
   }
   // 進行中の preview fetch があれば abort。leak した Worker 通信を絶つ。
   previewAbort?.abort()
@@ -650,7 +690,24 @@ onUnmounted(() => {
 
         <!-- extract 処理中: 配車 PDF だが logistics がまだ書かれていない -->
         <div v-else-if="isPdf && isExtractInProgress" class="mt-3 pt-3 border-t">
-          <div class="text-sm text-gray-500">
+          <!-- 一定時間 進まない = 抽出ジョブが固まっている (Refs #66)。
+               再抽出導線を目立たせる。 -->
+          <div v-if="isExtractStuck"
+               class="text-xs bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-medium">⚠️ 抽出が完了しません</span>
+              <button @click="recomputeExtract"
+                      :disabled="recomputingExtract"
+                      class="text-xs bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1 rounded disabled:opacity-50">
+                {{ recomputingExtract ? '再抽出中…' : '🔄 再抽出' }}
+              </button>
+            </div>
+            <p class="mt-1">
+              数分待っても運送情報が出ない場合、抽出ジョブが途中で止まっている
+              可能性があります。「🔄 再抽出」でやり直してください。
+            </p>
+          </div>
+          <div v-else class="text-sm text-gray-500">
             🔍 運送情報を抽出中…
           </div>
         </div>
