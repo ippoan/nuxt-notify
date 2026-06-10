@@ -7,11 +7,13 @@
 // 検証本体は `@ippoan/mcp-cf-workers` の `./auth` export (`verifyHs256Jwt`) を
 // 消費する (Refs ippoan/mcp-cf-workers#46 — 自前 Web Crypto コピーの解消)。
 // 本 worker の契約 (null-on-fail / tenant_id 必須 / skew なし) は wrapper で維持。
+// barrel (./auth) は jose 依存の cf-access / mcp-jwt を re-export するため、
+// jose を持たない本 worker は subpath export を直接 import する。
 import {
   verifyHs256Jwt,
   Hs256JwtError,
   type Hs256BaseClaims,
-} from "@ippoan/mcp-cf-workers/auth";
+} from "@ippoan/mcp-cf-workers/auth/hs256-jwt";
 
 export interface JwtClaims extends Hs256BaseClaims {
   sub: string;
