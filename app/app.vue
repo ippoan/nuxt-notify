@@ -2,7 +2,7 @@
 import { useAuth, AuthToolbar } from '@ippoan/auth-client'
 
 const route = useRoute()
-const { isAuthenticated, loadFromStorage, consumeFragment, redirectToLogin } = useAuth()
+const { isAuthenticated, loadFromStorage, consumeFragment, recoverFromCookie, redirectToLogin } = useAuth()
 const runtimeConfig = useRuntimeConfig()
 const { apiFetch } = useApi()
 
@@ -54,7 +54,13 @@ async function selectTenant(tenantId: string) {
 }
 
 onMounted(() => {
-  consumeFragment()
+  // OAuth リダイレクト直後は URL fragment (#token=...) を消費。fragment が無い
+  // (= notify.ippoan.org への通常遷移) 場合は、auth-worker が *.ippoan.org に配る
+  // logi_auth_token cookie (Domain=.ippoan.org) から復元する。recoverFromCookie を
+  // 呼ばないと cookie 配布ログインを拾えず「ログインしてください」でループする。
+  if (!consumeFragment()) {
+    recoverFromCookie()
+  }
   loadFromStorage()
 
   // エラー・テナント選択パラメータをチェック
