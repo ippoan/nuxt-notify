@@ -26,6 +26,9 @@ jobs:
     with:
       project_type: 'worker'
       working_directory: 'workers/email-receiver'
+      # monorepo unit worker。pending/traffic-report を per-worker
+      # (`traffic::<repo>::notify-email-receiver`) で記録 (Refs ippoan/ci-dashboard#427)。
+      report_worker_name: notify-email-receiver
       cache_dependency_path: 'workers/email-receiver/package-lock.json'
       install_command: 'npm ci'
       typecheck_command: 'npx tsc --noEmit'
