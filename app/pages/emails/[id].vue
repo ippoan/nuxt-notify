@@ -5,7 +5,7 @@ import { formatSize, formatDate, deliveryStatusLabel } from '~/utils/documentBad
 const route = useRoute()
 const router = useRouter()
 const { apiFetch } = useApi()
-const { token, orgId } = useAuth()
+const { token } = useAuth()
 
 const messageId = computed(() => String(route.params.id))
 
@@ -78,15 +78,10 @@ async function loadDeliveries(doc: EmailDocument) {
 
 async function downloadDoc(doc: EmailDocument) {
   try {
-    const config = useRuntimeConfig()
-    const apiBase = config.public.apiBase as string
+    // #434 step 2: /api/proxy/* 経由 (introspect で tenant 注入)。
     const headers: Record<string, string> = {}
-    if (token.value) {
-      headers.Authorization = `Bearer ${token.value}`
-    } else if (orgId.value) {
-      headers['X-Tenant-ID'] = orgId.value
-    }
-    const res = await fetch(`${apiBase}/api/notify/documents/${doc.id}/download`, { headers })
+    if (token.value) headers.Authorization = `Bearer ${token.value}`
+    const res = await fetch(`/api/proxy/notify/documents/${doc.id}/download`, { headers })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)

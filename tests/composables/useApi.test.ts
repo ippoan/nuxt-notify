@@ -27,12 +27,14 @@ describe('useApi', () => {
     mockOrgId.value = null
   })
 
-  it('GET request with no auth', async () => {
+  // apiFetch は #434 step 2 で /api/proxy/* 経由になった。proxy が introspect で
+  // tenant を注入するため、client は X-Tenant-ID を手動付与しない。
+  it('GET request with no auth (proxy 経由、X-Tenant-ID なし)', async () => {
     mockFetch.mockResolvedValue([{ id: '1' }])
     const { apiFetch } = useApi()
     const result = await apiFetch('/notify/recipients')
 
-    expect(mockFetch).toHaveBeenCalledWith('http://localhost:8080/api/notify/recipients', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/proxy/notify/recipients', {
       method: 'GET',
       body: undefined,
       headers: { 'Content-Type': 'application/json' },
@@ -46,14 +48,14 @@ describe('useApi', () => {
     const body = JSON.stringify({ name: 'Test' })
     await apiFetch('/notify/recipients', { method: 'POST', body })
 
-    expect(mockFetch).toHaveBeenCalledWith('http://localhost:8080/api/notify/recipients', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/proxy/notify/recipients', {
       method: 'POST',
       body,
       headers: { 'Content-Type': 'application/json' },
     })
   })
 
-  it('adds Authorization header when JWT token exists', async () => {
+  it('adds Authorization header when JWT token exists (X-Tenant-ID は注入しない)', async () => {
     mockToken.value = 'jwt-test-token'
     mockOrgId.value = 'tenant-123'
     mockFetch.mockResolvedValue([])
@@ -61,7 +63,7 @@ describe('useApi', () => {
     const { apiFetch } = useApi()
     await apiFetch('/notify/documents')
 
-    expect(mockFetch).toHaveBeenCalledWith('http://localhost:8080/api/notify/documents', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/proxy/notify/documents', {
       method: 'GET',
       body: undefined,
       headers: {
@@ -71,7 +73,7 @@ describe('useApi', () => {
     })
   })
 
-  it('adds X-Tenant-ID when no JWT but orgId exists', async () => {
+  it('orgId のみでも X-Tenant-ID は付けない (proxy が tenant を注入)', async () => {
     mockToken.value = null
     mockOrgId.value = '11111111-1111-1111-1111-111111111111'
     mockFetch.mockResolvedValue([])
@@ -79,13 +81,10 @@ describe('useApi', () => {
     const { apiFetch } = useApi()
     await apiFetch('/notify/documents')
 
-    expect(mockFetch).toHaveBeenCalledWith('http://localhost:8080/api/notify/documents', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/proxy/notify/documents', {
       method: 'GET',
       body: undefined,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Tenant-ID': '11111111-1111-1111-1111-111111111111',
-      },
+      headers: { 'Content-Type': 'application/json' },
     })
   })
 
@@ -94,7 +93,7 @@ describe('useApi', () => {
     const { apiFetch } = useApi()
     await apiFetch('/notify/recipients/abc', { method: 'DELETE' })
 
-    expect(mockFetch).toHaveBeenCalledWith('http://localhost:8080/api/notify/recipients/abc', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/proxy/notify/recipients/abc', {
       method: 'DELETE',
       body: undefined,
       headers: { 'Content-Type': 'application/json' },
@@ -107,14 +106,15 @@ describe('useApi', () => {
     const body = JSON.stringify({ enabled: false })
     await apiFetch('/notify/recipients/abc', { method: 'PUT', body })
 
-    expect(mockFetch).toHaveBeenCalledWith('http://localhost:8080/api/notify/recipients/abc', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/proxy/notify/recipients/abc', {
       method: 'PUT',
       body,
       headers: { 'Content-Type': 'application/json' },
     })
   })
 
-  describe('uploadFetch', () => {
+  // uploadFetch は multipart のため proxy を通さず apiBase 直叩きのまま (旧挙動維持)。
+  describe('uploadFetch (proxy 非経由、apiBase 直叩き)', () => {
     it('POSTs FormData without Content-Type (boundary set by ofetch)', async () => {
       mockFetch.mockResolvedValue({ document_ids: ['id-1'], count: 1 })
       const { uploadFetch } = useApi()

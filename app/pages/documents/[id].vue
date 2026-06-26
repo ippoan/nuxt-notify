@@ -6,7 +6,7 @@ import { isExtractionStuck } from '~/utils/documentBadges'
 
 const route = useRoute()
 const { apiFetch } = useApi()
-const { token, orgId } = useAuth()
+const { token } = useAuth()
 const { onUpdate: onRedactUpdate } = useRedactionWatch()
 
 const documentId = computed(() => String(route.params.id))
@@ -279,21 +279,17 @@ async function loadPreview() {
   previewError.value = ''
   pdfPages.value = 0
   try {
-    const config = useRuntimeConfig()
-    const apiBase = config.public.apiBase as string
+    // #434 step 2: /api/proxy/* 経由 (introspect で tenant 注入)。X-Tenant-ID は
+    // 手動付与しない。binary レスポンスは proxy が透過する。
     const headers: Record<string, string> = {}
-    if (token.value) {
-      headers.Authorization = `Bearer ${token.value}`
-    } else if (orgId.value) {
-      headers['X-Tenant-ID'] = orgId.value
-    }
+    if (token.value) headers.Authorization = `Bearer ${token.value}`
     const qs = previewMode.value === 'original' ? '?original=true' : ''
     // 認証付きで preview を取得。Content-Type で PDF / 画像を分岐:
     //   - application/pdf → VuePdfEmbed (PDF.js)
     //   - image/jpeg, image/png, etc. → <img> (rust-alc-api PR #327 以降の
     //     redacted は JPEG 1 枚で配信される)
     const res = await fetch(
-      `${apiBase}/api/notify/documents/${document.value.id}/preview${qs}`,
+      `/api/proxy/notify/documents/${document.value.id}/preview${qs}`,
       { headers, signal: ctrl.signal },
     )
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -387,15 +383,10 @@ function switchPreview(mode: 'redacted' | 'original') {
 async function downloadDoc() {
   if (!document.value) return
   try {
-    const config = useRuntimeConfig()
-    const apiBase = config.public.apiBase as string
+    // #434 step 2: /api/proxy/* 経由 (introspect で tenant 注入)。
     const headers: Record<string, string> = {}
-    if (token.value) {
-      headers.Authorization = `Bearer ${token.value}`
-    } else if (orgId.value) {
-      headers['X-Tenant-ID'] = orgId.value
-    }
-    const res = await fetch(`${apiBase}/api/notify/documents/${document.value.id}/download`, { headers })
+    if (token.value) headers.Authorization = `Bearer ${token.value}`
+    const res = await fetch(`/api/proxy/notify/documents/${document.value.id}/download`, { headers })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
