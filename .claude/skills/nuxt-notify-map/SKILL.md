@@ -1,7 +1,7 @@
 ---
 name: nuxt-notify-map
-generated-from: nuxt-notify:eba745f247d411f8e2a1146109ddc086d81da853
-paths: [app/, workers/]
+generated-from: nuxt-notify:ee3c79b5af895a2fe776ce33d9083105e7553198
+paths: [app/, server/, workers/]
 description: ippoan/nuxt-notify (文書配信・メール受信・墨消し通知 PWA、Nuxt 4 + Cloudflare Workers) の構造ナビゲーション。frontend pages / 2 つの補助 Worker (email-receiver / realtime-bus DO) / 墨消し WebSocket 通知の配置と prod/staging 構成・gotcha を 1 枚にまとめる。トリガー:「nuxt-notify」「notify.ippoan.org」「メール受信」「email-receiver」「realtime-bus」「RedactBus」「墨消し」「redaction」「LINE WORKS 配信」「公文書配信」「v/[token]」等。
 ---
 
@@ -23,6 +23,7 @@ realtime-bus Worker の WebSocket で push される。
 | **components** | `DistributeModal.vue`, `FolderWatcher.vue`, `UploadButton.vue` | 配信モーダル / フォルダ監視 / アップロード |
 | **composables** | `useApi.ts`, `useFilePicker.ts`, `useFolderWatcher.ts`, `useRedactionWatch.ts` | API / ファイル選択 / フォルダ監視 / 墨消し WS 購読 |
 | **utils** | `app/utils/{folderWatchDb,preview-fetch}.ts` | フォルダ監視 IndexedDB / プレビュー取得 |
+| **server route** | `server/api/proxy/[...path].ts` | 認証付き REST proxy。`@ippoan/auth-client/server` の `createIdentityProxyHandler` で introspect 検証 → X-Tenant-ID + X-User-* 注入 → rust-alc-api `/api/*` 転送 (#434 step 2)。AUTH_WORKER service binding + INTERNAL_SHARED_SECRET 必須 |
 | **Worker: email-receiver** | `workers/email-receiver/src/index.ts` | Cloudflare Email Routing 受信 → host で prod/staging 振り分け → backend ingest に POST (PostalMime で parse) |
 | **Worker: realtime-bus** | `workers/realtime-bus/src/{index,redact-bus,jwt}.ts` | 墨消し完了の DO fan-out。`POST /broadcast` (backend push) / `GET /subscribe` (browser WS)。`RedactBus` DO は hibernation 対応 |
 
@@ -39,6 +40,16 @@ realtime-bus Worker の WebSocket で push される。
 - **frontend は runtime secret を持たない** が、ci-workflows の secret-verify gate を pass させるため wrangler.jsonc に `"secrets": {"required": []}` を**明示 declare** (Refs ippoan/ci-workflows#50)。空でも消さない。
 - **email-receiver は 1 Worker で prod/staging 両受け**。host (notify.ippoan.org / notify-staging…) で `pickRoute` がエンドポイント+secret を選ぶ。`MAX_TOTAL_BYTES=25MB` / `MAX_ATTACHMENTS=20`。
 - **realtime-bus は no-op 許容**。frontend の `realtimeBusUrl` 未設定なら `useRedactionWatch` は no-op (既存 polling が UI 更新を担う)。WS subprotocol は `"bearer,<jwt>"`、broadcast は `X-Broadcast-Secret` で検証。
+- **認証付き JSON API は `/api/proxy/*` 経由** (#434 step 2)。`useApi().apiFetch` /
+  preview / download は相対 `/api/proxy/...` を叩き、proxy が introspect で tenant を
+  注入する。client は Bearer token だけ載せ X-Tenant-ID は手動付与しない。
+- **公開 viewer `v/[token]` は proxy を通さない**。認証不要で `apiBase` を直叩きする
+  (`/api/notify/v/{token}` / `/file`)。proxy に通すと introspect 401 になるので壊さない。
+- **multipart upload (`useApi().uploadFetch`) は proxy 非経由** で `apiBase` 直叩きのまま。
+  `createIdentityProxyHandler` は body を JSON.stringify するため multipart を壊す
+  (carins は base64 JSON で送る別契約)。multipart の proxy 化は要追加検討。
+- **OAuth redirect (`/api/auth/line/redirect`、app.vue / settings.vue)** も `apiBase` 直叩き。
+  introspect 前の redirect 経路なので proxy 化しない。
 - README.md は Nuxt boilerplate。
 
 ## CCoW / CI から見た立ち位置

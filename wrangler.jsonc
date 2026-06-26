@@ -13,12 +13,31 @@
 		"enabled": true,
 		"head_sampling_rate": 1
 	},
-	// Nuxt frontend は runtime secret を持たない (config 値は public な NUXT_PUBLIC_*
-	// 環境変数のみ)。ippoan/ci-workflows の secret-verify gate を明示的に pass
-	// させるため、空 list を declare する (Refs ippoan/ci-workflows#50)。
+	// frontend-ci.yml の secret-verify job が secret backup の auditability の
+	// ため明示宣言を要求する。INTERNAL_SHARED_SECRET は Secrets Store binding
+	// として別途宣言するため、ここは引き続き空 list で良い (Refs ippoan/ci-workflows#50)。
 	"secrets": {
 		"required": []
 	},
+	// REST proxy (server/api/proxy/[...path].ts, #434 step 2) 用。
+	// leg A: auth-worker /auth/introspect を service binding (worker-to-worker) で
+	// 叩いて browser JWT を検証する。INTERNAL_SHARED_SECRET は introspect の認証用
+	// (alc-app / carins / dtako-logs と同じ CF Secrets Store entry を物理共有)。
+	// leg B (rust-alc-api への X-Tenant-ID / X-User-* 転送) には proxy 真正性 secret を
+	// 載せない。bare X-Tenant-ID 直叩きは Cloud Run の網層ロックダウンで塞ぐ方針。
+	"services": [
+		{
+			"binding": "AUTH_WORKER",
+			"service": "auth-worker"
+		}
+	],
+	"secrets_store_secrets": [
+		{
+			"binding": "INTERNAL_SHARED_SECRET",
+			"store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+			"secret_name": "INTERNAL_SHARED_SECRET"
+		}
+	],
 	"env": {
 		"staging": {
 			"name": "nuxt-notify-staging",
@@ -30,13 +49,32 @@
 			],
 			"vars": {
 				"NUXT_PUBLIC_API_BASE": "https://rust-alc-api-staging-566bls5vfq-an.a.run.app",
+				// /api/proxy が叩く rust-alc-api backend (server-only, #434 step 2)。
+				"NUXT_ALC_API_URL": "https://rust-alc-api-staging-566bls5vfq-an.a.run.app",
 				"NUXT_PUBLIC_AUTH_WORKER_URL": "https://auth-staging.ippoan.org",
 				"NUXT_PUBLIC_REALTIME_BUS_URL": "wss://realtime.notify-staging.ippoan.org"
-			}
+			},
+			// named env は top-level binding を継承しないので再宣言する。
+			// staging は auth-worker-staging を叩く。
+			"services": [
+				{
+					"binding": "AUTH_WORKER",
+					"service": "auth-worker-staging"
+				}
+			],
+			"secrets_store_secrets": [
+				{
+					"binding": "INTERNAL_SHARED_SECRET",
+					"store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
+					"secret_name": "INTERNAL_SHARED_SECRET"
+				}
+			]
 		}
 	},
 	"vars": {
 		"NUXT_PUBLIC_API_BASE": "https://alc-api.ippoan.org",
+		// /api/proxy が叩く rust-alc-api backend (server-only, #434 step 2)。
+		"NUXT_ALC_API_URL": "https://alc-api.ippoan.org",
 		"NUXT_PUBLIC_AUTH_WORKER_URL": "https://auth.ippoan.org",
 		"NUXT_PUBLIC_REALTIME_BUS_URL": "wss://realtime.notify.ippoan.org"
 	},

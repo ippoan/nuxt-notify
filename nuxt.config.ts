@@ -9,7 +9,16 @@ export default defineNuxtConfig({
     preset: 'cloudflare_module',
   },
 
+  // @ippoan/auth-client/server (createIdentityProxyHandler) を Nitro が transpile
+  // できるよう指定。.vue / .mjs ソースをそのまま ship するため必要。
+  build: {
+    transpile: ['@ippoan/auth-client'],
+  },
+
   runtimeConfig: {
+    // server-only: /api/proxy が転送する rust-alc-api backend URL。
+    // wrangler.jsonc の NUXT_ALC_API_URL から注入される。
+    alcApiUrl: process.env.NUXT_ALC_API_URL || 'https://alc-api.ippoan.org',
     public: {
       apiBase: 'http://localhost:8080',
       authWorkerUrl: 'https://auth.ippoan.org',
