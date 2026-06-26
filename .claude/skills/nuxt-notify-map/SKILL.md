@@ -1,6 +1,6 @@
 ---
 name: nuxt-notify-map
-generated-from: nuxt-notify:eba745f247d411f8e2a1146109ddc086d81da853
+generated-from: nuxt-notify:ee3c79b5af895a2fe776ce33d9083105e7553198
 paths: [app/, server/, workers/]
 description: ippoan/nuxt-notify (文書配信・メール受信・墨消し通知 PWA、Nuxt 4 + Cloudflare Workers) の構造ナビゲーション。frontend pages / 2 つの補助 Worker (email-receiver / realtime-bus DO) / 墨消し WebSocket 通知の配置と prod/staging 構成・gotcha を 1 枚にまとめる。トリガー:「nuxt-notify」「notify.ippoan.org」「メール受信」「email-receiver」「realtime-bus」「RedactBus」「墨消し」「redaction」「LINE WORKS 配信」「公文書配信」「v/[token]」等。
 ---
