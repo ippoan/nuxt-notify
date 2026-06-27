@@ -48,8 +48,12 @@
 			"id": "aac1498d63db410fbb69ae54d0715f03"
 		}
 	],
-	// NOTE: R2 binding (NOTIFY_R2 → notify-files) は bucket 名/account 確認後に追加する。
-	// 未設定の間は file / image route が 503 (非破壊、viewer ページは未切替で rust 配信のまま)。
+	"r2_buckets": [
+		{
+			"binding": "NOTIFY_R2",
+			"bucket_name": "notify-files"
+		}
+	],
 	"env": {
 		"staging": {
 			"name": "nuxt-notify-staging",
@@ -85,6 +89,12 @@
 				{
 					"binding": "NOTIFY_VIEW_KV",
 					"id": "22512843c2a44fb8a60f993089080632"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "NOTIFY_R2",
+					"bucket_name": "notify-files-staging"
 				}
 			]
 		}
