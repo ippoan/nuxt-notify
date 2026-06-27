@@ -22,8 +22,9 @@ const loginError = ref('')
 // テナント選択 (LINE Login で複数テナントの場合)
 interface TenantOption { id: string; name: string }
 const tenantOptions = ref<TenantOption[]>([])
-const lineUserId = ref('')
-const lineName = ref('')
+const lineName = ref('') // 表示用 ("<name> さん")
+// line_user_id は署名済み select_token に封入され、front-end は中身を持たない (#434 security)。
+const selectToken = ref('')
 const selectingTenant = ref(false)
 
 async function selectTenant(tenantId: string) {
@@ -36,8 +37,7 @@ async function selectTenant(tenantId: string) {
       {
         method: 'POST',
         body: {
-          line_user_id: lineUserId.value,
-          line_name: lineName.value,
+          select_token: selectToken.value,
           tenant_id: tenantId,
         },
       },
@@ -60,6 +60,8 @@ onMounted(() => {
   // (= notify.ippoan.org への通常遷移) 場合は、auth-worker が *.ippoan.org に配る
   // logi_auth_token cookie (Domain=.ippoan.org) から復元する。recoverFromCookie を
   // 呼ばないと cookie 配布ログインを拾えず「ログインしてください」でループする。
+  // 複数テナント選択 fragment (#select_token=...) は consumeFragment が消す前に捕捉。
+  const rawHash = window.location.hash
   if (!consumeFragment()) {
     recoverFromCookie()
   }
@@ -72,13 +74,16 @@ onMounted(() => {
     loginError.value = errorParam
     window.history.replaceState({}, '', window.location.pathname)
   }
-  const tenantsParam = params.get('tenants')
-  if (tenantsParam) {
+  // 複数テナント選択は fragment (#select_token=...&line_name=...&tenants=...)。
+  // 生 line_user_id は署名済み select_token 内のみ (auth bypass / Referer leak 防止、Refs #434)。
+  const hashParams = new URLSearchParams(rawHash.replace(/^#/, ''))
+  const tenantsParam = hashParams.get('tenants')
+  const tokenParam = hashParams.get('select_token')
+  if (tenantsParam && tokenParam) {
     try {
       tenantOptions.value = JSON.parse(tenantsParam)
-      lineUserId.value = params.get('line_user_id') || ''
-      lineName.value = params.get('line_name') || ''
-      // クエリパラメータをクリア
+      selectToken.value = tokenParam
+      lineName.value = hashParams.get('line_name') || ''
       window.history.replaceState({}, '', window.location.pathname)
     } catch { /* ignore */ }
   }
