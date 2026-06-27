@@ -4,16 +4,16 @@ import { useAuth, AuthToolbar } from '@ippoan/auth-client'
 const route = useRoute()
 const { isAuthenticated, loadFromStorage, consumeFragment, recoverFromCookie, redirectToLogin } = useAuth()
 const runtimeConfig = useRuntimeConfig()
-const { apiFetch } = useApi()
 
 // `/v/...` は配信受信者向けの公開 viewer (ログイン不要)。
 // header / 認証ゲートを丸ごとスキップして NuxtPage だけを描画する。
 const isPublicView = computed(() => route.path.startsWith('/v/'))
 
+// #434 Phase 4: LINE Login は rust ではなく auth-worker (/oauth/line/*) を向く。
+const authWorkerUrl = runtimeConfig.public.authWorkerUrl as string
 const lineLoginUrl = computed(() => {
-  const apiBase = runtimeConfig.public.apiBase as string
   const redirectUri = encodeURIComponent(window.location.origin + '/?lw_callback=1')
-  return `${apiBase}/api/auth/line/redirect?redirect_uri=${redirectUri}`
+  return `${authWorkerUrl}/oauth/line/redirect?redirect_uri=${redirectUri}`
 })
 
 // エラーメッセージ (LINE Login 失敗時)
@@ -29,15 +29,17 @@ const selectingTenant = ref(false)
 async function selectTenant(tenantId: string) {
   selectingTenant.value = true
   try {
-    const res = await apiFetch<{ access_token: string; refresh_token: string; expires_in: number }>(
-      '/auth/line/select-tenant',
+    // select-tenant は pre-login (JWT 無し) なので /api/proxy 経由ではなく
+    // auth-worker の public route を直接叩く (#434 Phase 4)。
+    const res = await $fetch<{ access_token: string; refresh_token: string; expires_in: number }>(
+      `${authWorkerUrl}/oauth/line/select-tenant`,
       {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           line_user_id: lineUserId.value,
           line_name: lineName.value,
           tenant_id: tenantId,
-        }),
+        },
       },
     )
     // JWT をストレージに保存してリロード
