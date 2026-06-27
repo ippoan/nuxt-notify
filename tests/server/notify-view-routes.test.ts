@@ -18,13 +18,29 @@ const { createErrorMock, headers, routerParams, bodyRef, setHeaderMock } = vi.ho
   ;(globalThis as Record<string, unknown>).readBody = async () => bodyRef.value
   const setHeaderMock = vi.fn()
   ;(globalThis as Record<string, unknown>).setResponseHeader = setHeaderMock
+  // read-status route が使う Nitro グローバル。
+  ;(globalThis as Record<string, unknown>).useRuntimeConfig = () => ({
+    public: { authWorkerUrl: 'https://auth.example' },
+  })
   return { createErrorMock, headers, routerParams, bodyRef, setHeaderMock }
 })
+
+// read-status は requireAuth (introspect) で tenant_id を得る。テストでは固定 tenant に mock。
+vi.mock('@ippoan/auth-client/server', () => ({
+  requireAuth: vi.fn(async () => ({
+    active: true,
+    tenant_id: 'tn-1',
+    role: 'admin',
+    email: 'a@example.com',
+    sub: 'u-1',
+  })),
+}))
 
 import registerView from '../../server/api/notify/register-view.post'
 import viewMeta from '../../server/api/notify/v/[token].get'
 import viewFile from '../../server/api/notify/v/[token]/file.get'
 import viewImage from '../../server/api/notify/v/[token]/image.jpg.get'
+import readStatus from '../../server/api/notify/read-status/[documentId].get'
 
 const call = (h: unknown, e: unknown) => (h as (e: unknown) => Promise<unknown>)(e)
 const eventWith = (env: Record<string, unknown>) => ({ context: { cloudflare: { env } } })
@@ -35,6 +51,10 @@ function fakeKv(initial: Record<string, string> = {}) {
     store,
     put: vi.fn(async (k: string, v: string) => { store.set(k, v) }),
     get: vi.fn(async (k: string) => store.get(k) ?? null),
+    list: vi.fn(async ({ prefix }: { prefix: string; cursor?: string }) => ({
+      keys: [...store.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })),
+      list_complete: true as const,
+    })),
   }
 }
 function fakeR2(objects: Record<string, Uint8Array> = {}) {
@@ -50,6 +70,7 @@ const past = '2000-01-01T00:00:00.000Z'
 function viewRec(over: Record<string, unknown> = {}) {
   return JSON.stringify({
     r2_key: 'tenant/m/file.pdf',
+    tenant_id: 'tn-1',
     document_id: 'doc-1',
     recipient_id: 'rcp-1',
     file_name: 'file.pdf',
@@ -100,7 +121,7 @@ describe('register-view', () => {
   })
   it('正常は KV に view:{token} を put', async () => {
     headers['x-notify-internal-secret'] = 'right'
-    bodyRef.value = { token: 'tok', r2_key: 'k', document_id: 'd', recipient_id: 'r', expire_at: future }
+    bodyRef.value = { token: 'tok', tenant_id: 'tn', r2_key: 'k', document_id: 'd', recipient_id: 'r', expire_at: future }
     const kv = fakeKv()
     const res = await call(registerView, eventWith({ INTERNAL_SHARED_SECRET: 'right', NOTIFY_VIEW_KV: kv }))
     expect(res).toEqual({ ok: true })
@@ -131,17 +152,17 @@ describe('GET /v/{token} metadata', () => {
     expect(res.content_type).toBe('application/pdf')
     expect(res.file_name).toBe('file.pdf')
     expect(JSON.stringify(res)).not.toContain('r2_key')
-    // 既読 read:doc-1:rcp-1 が書かれる
-    expect(kv.store.has('read:doc-1:rcp-1')).toBe(true)
+    // 既読 read:{tenant}:doc-1:rcp-1 が書かれる (tenant prefix)
+    expect(kv.store.has('read:tn-1:doc-1:rcp-1')).toBe(true)
   })
   it('既読が既存なら上書きしない', async () => {
     routerParams.token = 'tok'
     const kv = fakeKv({
       'view:tok': viewRec(),
-      'read:doc-1:rcp-1': JSON.stringify({ read_at: 'orig', recipient_id: 'rcp-1' }),
+      'read:tn-1:doc-1:rcp-1': JSON.stringify({ read_at: 'orig', recipient_id: 'rcp-1' }),
     })
     await call(viewMeta, eventWith({ NOTIFY_VIEW_KV: kv }))
-    expect(JSON.parse(kv.store.get('read:doc-1:rcp-1')!).read_at).toBe('orig')
+    expect(JSON.parse(kv.store.get('read:tn-1:doc-1:rcp-1')!).read_at).toBe('orig')
   })
 })
 
@@ -199,5 +220,31 @@ describe('GET /v/{token}/image.jpg', () => {
     const res = (await call(viewImage, eventWith({ NOTIFY_VIEW_KV: kv, NOTIFY_R2: r2 }))) as Uint8Array
     expect(Array.from(res)).toEqual([9])
     expect(setHeaderMock).toHaveBeenCalledWith(expect.anything(), 'content-type', 'image/jpeg')
+  })
+})
+
+describe('GET /read-status/{documentId}', () => {
+  it('KV 未設定は 503', async () => {
+    routerParams.documentId = 'doc-1'
+    await expectStatus(call(readStatus, eventWith({})), 503)
+  })
+  it('INTERNAL_SHARED_SECRET 未設定は 503', async () => {
+    routerParams.documentId = 'doc-1'
+    await expectStatus(call(readStatus, eventWith({ NOTIFY_VIEW_KV: fakeKv() })), 503)
+  })
+  it('tenant scope で reads を返す (別 tenant の read は除外)', async () => {
+    routerParams.documentId = 'doc-1'
+    const kv = fakeKv({
+      'read:tn-1:doc-1:rcp-1': JSON.stringify({ read_at: 't1', recipient_id: 'rcp-1' }),
+      'read:tn-1:doc-1:rcp-2': JSON.stringify({ read_at: 't2', recipient_id: 'rcp-2' }),
+      // 別 tenant / 別 doc は prefix 外なので返らない
+      'read:tn-OTHER:doc-1:rcp-9': JSON.stringify({ read_at: 'x', recipient_id: 'rcp-9' }),
+      'read:tn-1:doc-2:rcp-3': JSON.stringify({ read_at: 'y', recipient_id: 'rcp-3' }),
+    })
+    const res = (await call(
+      readStatus,
+      eventWith({ NOTIFY_VIEW_KV: kv, INTERNAL_SHARED_SECRET: 'sek' }),
+    )) as { reads: Record<string, string> }
+    expect(res.reads).toEqual({ 'rcp-1': 't1', 'rcp-2': 't2' })
   })
 })

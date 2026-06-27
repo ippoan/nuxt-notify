@@ -46,8 +46,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 410, statusMessage: 'gone' })
   }
 
-  // 既読記録 (恒久)。初回閲覧時刻を保つため、既存があれば上書きしない。
-  const rkey = readKey(rec.document_id, rec.recipient_id)
+  // 既読記録 (恒久、tenant×doc×recipient キー)。初回閲覧時刻を保つため上書きしない。
+  const rkey = readKey(rec.tenant_id, rec.document_id, rec.recipient_id)
   const existing = await kv.get(rkey)
   if (!existing) {
     const read: ReadRecord = {

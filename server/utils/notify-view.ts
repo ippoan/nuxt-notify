@@ -3,8 +3,9 @@
  *
  * 設計 (Refs ippoan/rust-alc-api#434):
  * - `view:{token}` … r2_key + メタ。**TTL = リンク失効**。配信用、使い捨て
- * - `read:{document_id}:{recipient_id}` … 既読。**TTL なし = 恒久**。file キーなので
- *   token (view) 失効と無関係に既読履歴が残る
+ * - `read:{tenant_id}:{document_id}:{recipient_id}` … 既読。**TTL なし = 恒久**。
+ *   file (tenant×doc×recipient) キーなので token (view) 失効と無関係に既読履歴が残り、
+ *   tenant prefix でサーバ側テナント分離できる
  *
  * runtime で rust/auth-worker を呼ばない。rust は distribute 時に register endpoint
  * 経由で `view:{token}` を書くだけ。
@@ -15,6 +16,7 @@
 /** KV に格納する view レコード (配信用、TTL あり)。 */
 export interface ViewRecord {
   r2_key: string
+  tenant_id: string
   document_id: string
   recipient_id: string
   file_name: string | null
@@ -46,13 +48,14 @@ export function viewKey(token: string): string {
   return `view:${token}`
 }
 
-export function readKey(documentId: string, recipientId: string): string {
-  return `read:${documentId}:${recipientId}`
+export function readKey(tenantId: string, documentId: string, recipientId: string): string {
+  return `read:${tenantId}:${documentId}:${recipientId}`
 }
 
-/** read:{document_id}: prefix (管理画面が document 単位で既読を list する用)。 */
-export function readKeyPrefix(documentId: string): string {
-  return `read:${documentId}:`
+/** read:{tenant_id}:{document_id}: prefix (管理画面が tenant scope で document 単位の
+ *  既読を list する用。KV multi-tenant の定石 = tenant prefix でサーバ側分離)。 */
+export function readKeyPrefix(tenantId: string, documentId: string): string {
+  return `read:${tenantId}:${documentId}:`
 }
 
 /**
@@ -64,12 +67,14 @@ export function parseRegisterBody(body: unknown): ViewRecord | null {
   const b = body as Record<string, unknown>
   const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null)
   const r2_key = str(b.r2_key)
+  const tenant_id = str(b.tenant_id)
   const document_id = str(b.document_id)
   const recipient_id = str(b.recipient_id)
   const expire_at = str(b.expire_at)
-  if (!r2_key || !document_id || !recipient_id || !expire_at) return null
+  if (!r2_key || !tenant_id || !document_id || !recipient_id || !expire_at) return null
   return {
     r2_key,
+    tenant_id,
     document_id,
     recipient_id,
     file_name: typeof b.file_name === 'string' ? b.file_name : null,

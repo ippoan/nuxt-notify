@@ -74,6 +74,9 @@ interface DocumentResponse {
 
 const document = ref<NotifyDocument | null>(null)
 const deliveries = ref<Delivery[]>([])
+// viewer Worker が KV に記録した既読 (recipient_id → read_at)。lockdown 移行後の既読は
+// rust DB ではなく KV に入るため、rust の read_at とマージ表示する (Refs #434)。
+const kvReads = ref<Record<string, string>>({})
 const loading = ref(true)
 const error = ref('')
 const showDistribute = ref(false)
@@ -224,6 +227,7 @@ async function load() {
     const res = await apiFetch<DocumentResponse>(`/notify/documents/${documentId.value}`)
     document.value = res.document
     deliveries.value = res.deliveries
+    void loadReadStatus()
     // processing 中は 5 秒後に再取得 (UI が「処理中」のまま固まらないように)
     schedulePollIfProcessing()
   } catch (e: any) {
@@ -231,6 +235,25 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+// KV の既読を取得 (best-effort、同一オリジンの read-status route = requireAuth で
+// tenant scope)。失敗しても既読列が '-' になるだけで致命ではない。
+async function loadReadStatus() {
+  try {
+    const res = await fetch(`/api/notify/read-status/${documentId.value}`)
+    if (res.ok) {
+      const data = (await res.json()) as { reads: Record<string, string> }
+      kvReads.value = data.reads ?? {}
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// rust DB の read_at と KV の既読をマージ (どちらかにあれば既読)。
+function readAtOf(d: Delivery): string | null {
+  return d.read_at ?? kvReads.value[d.recipient_id] ?? null
 }
 
 function schedulePollIfProcessing() {
@@ -847,7 +870,7 @@ onUnmounted(() => {
                   {{ deliveryStatusLabel(d.status).label }}
                 </span>
               </td>
-              <td class="py-1 text-gray-500">{{ d.read_at ? formatDate(d.read_at) : '-' }}</td>
+              <td class="py-1 text-gray-500">{{ readAtOf(d) ? formatDate(readAtOf(d)!) : '-' }}</td>
             </tr>
           </tbody>
         </table>
