@@ -35,10 +35,12 @@ const qrCodeUrl = computed(() => {
   return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(friendAddUrl.value)}`
 })
 
+const authWorkerUrl = runtimeConfig.public.authWorkerUrl as string
 const inviteLoginUrl = computed(() => {
   if (!orgId.value) return ''
   const redirectUri = encodeURIComponent(window.location.origin + '/?lw_callback=1')
-  return `${apiBase}/api/auth/line/redirect?tenant_id=${orgId.value}&redirect_uri=${redirectUri}`
+  // #434 Phase 4: LINE Login は auth-worker (/oauth/line/*) を向く。
+  return `${authWorkerUrl}/oauth/line/redirect?tenant_id=${orgId.value}&redirect_uri=${redirectUri}`
 })
 
 const inviteQrCodeUrl = computed(() => {
