@@ -80,12 +80,13 @@ async function load() {
     if (res.status === 410) { status.value = 'gone'; return }
     if (res.status === 404) { status.value = 'not_found'; return }
     if (!res.ok) { status.value = 'error'; return }
-    meta.value = await res.json()
+    const m = (await res.json()) as ViewMetadata
+    meta.value = m
     resolvedBase.value = base
     // Worker メタは content_type を含むので HEAD 不要。rust fallback は含まないので
     // 実体の Content-Type を HEAD で取る (PDF / JPEG 切替判定)。取れなければ null のまま
     // → 「ファイルを開く」ボタン (default ブランチ) に倒す。
-    const ct = meta.value.content_type
+    const ct = m.content_type
     if (ct) {
       fileContentType.value = ct.toLowerCase()
     } else {
