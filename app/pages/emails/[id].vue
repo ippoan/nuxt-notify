@@ -49,6 +49,9 @@ interface DocumentResponse {
 
 const detail = ref<EmailDetail | null>(null)
 const deliveriesByDoc = ref<Record<string, Delivery[]>>({})
+// viewer Worker が KV に記録した既読 (docId → recipient_id → read_at)。lockdown 移行後の
+// 既読は rust DB ではなく KV に入るため rust の read_at とマージ表示する (Refs #434)。
+const kvReadsByDoc = ref<Record<string, Record<string, string>>>({})
 const loading = ref(true)
 const error = ref('')
 const deleting = ref<Record<string, boolean>>({})
@@ -71,9 +74,28 @@ async function loadDeliveries(doc: EmailDocument) {
   try {
     const res = await apiFetch<DocumentResponse>(`/notify/documents/${doc.id}`)
     deliveriesByDoc.value[doc.id] = res.deliveries
+    void loadReadStatus(doc.id)
   } catch {
     deliveriesByDoc.value[doc.id] = []
   }
+}
+
+// KV の既読を doc 単位で取得 (best-effort、同一オリジン read-status = requireAuth で tenant scope)。
+async function loadReadStatus(docId: string) {
+  try {
+    const res = await fetch(`/api/notify/read-status/${docId}`)
+    if (res.ok) {
+      const data = (await res.json()) as { reads: Record<string, string> }
+      kvReadsByDoc.value[docId] = data.reads ?? {}
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// rust DB の read_at と KV の既読をマージ (どちらかにあれば既読)。
+function readAtOf(docId: string, d: Delivery): string | null {
+  return d.read_at ?? kvReadsByDoc.value[docId]?.[d.recipient_id] ?? null
 }
 
 async function downloadDoc(doc: EmailDocument) {
@@ -203,7 +225,7 @@ onMounted(loadDetail)
                     {{ deliveryStatusLabel(d.status).label }}
                   </span>
                 </td>
-                <td class="py-1 text-gray-500">{{ d.read_at ? formatDate(d.read_at) : '-' }}</td>
+                <td class="py-1 text-gray-500">{{ readAtOf(doc.id, d) ? formatDate(readAtOf(doc.id, d)!) : '-' }}</td>
               </tr>
             </tbody>
           </table>

@@ -18,6 +18,7 @@ import {
 
 const sample = (): ViewRecord => ({
   r2_key: 'tenant/email/msg/file.pdf',
+  tenant_id: 'tn-1',
   document_id: 'doc-1',
   recipient_id: 'rcp-1',
   file_name: 'file.pdf',
@@ -31,8 +32,8 @@ const sample = (): ViewRecord => ({
 describe('keys', () => {
   it('viewKey / readKey / readKeyPrefix', () => {
     expect(viewKey('abc')).toBe('view:abc')
-    expect(readKey('doc-1', 'rcp-1')).toBe('read:doc-1:rcp-1')
-    expect(readKeyPrefix('doc-1')).toBe('read:doc-1:')
+    expect(readKey('tn-1', 'doc-1', 'rcp-1')).toBe('read:tn-1:doc-1:rcp-1')
+    expect(readKeyPrefix('tn-1', 'doc-1')).toBe('read:tn-1:doc-1:')
   })
 })
 
@@ -41,6 +42,7 @@ describe('parseRegisterBody', () => {
     const rec = parseRegisterBody({ token: 't', ...sample() })
     expect(rec).not.toBeNull()
     expect(rec!.r2_key).toBe('tenant/email/msg/file.pdf')
+    expect(rec!.tenant_id).toBe('tn-1')
     expect(rec!.file_size_bytes).toBe(2048)
   })
 
@@ -48,13 +50,15 @@ describe('parseRegisterBody', () => {
     expect(parseRegisterBody(null)).toBeNull()
     expect(parseRegisterBody('x')).toBeNull()
     expect(parseRegisterBody({})).toBeNull()
-    expect(parseRegisterBody({ r2_key: 'k', document_id: 'd', recipient_id: 'r' })).toBeNull() // expire_at 欠落
-    expect(parseRegisterBody({ r2_key: '', document_id: 'd', recipient_id: 'r', expire_at: 'e' })).toBeNull() // 空文字
+    expect(parseRegisterBody({ r2_key: 'k', tenant_id: 't', document_id: 'd', recipient_id: 'r' })).toBeNull() // expire_at 欠落
+    expect(parseRegisterBody({ r2_key: 'k', document_id: 'd', recipient_id: 'r', expire_at: 'e' })).toBeNull() // tenant_id 欠落
+    expect(parseRegisterBody({ r2_key: '', tenant_id: 't', document_id: 'd', recipient_id: 'r', expire_at: 'e' })).toBeNull() // 空文字
   })
 
   it('optional は型不一致なら null フィールドに落とす', () => {
     const rec = parseRegisterBody({
       r2_key: 'k',
+      tenant_id: 't',
       document_id: 'd',
       recipient_id: 'r',
       expire_at: 'e',
