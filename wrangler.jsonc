@@ -38,6 +38,22 @@
 			"secret_name": "INTERNAL_SHARED_SECRET"
 		}
 	],
+	// 公開 viewer (lockdown 後、Refs ippoan/rust-alc-api#434) 用。
+	// view:{token} (TTL=失効) + read:{document_id}:{recipient_id} (恒久) を KV に持ち、
+	// 本体は R2 (notify-files) から同一オリジン配信する。rust は distribute 時に
+	// /api/notify/register-view で KV を書くだけ。
+	"kv_namespaces": [
+		{
+			"binding": "NOTIFY_VIEW_KV",
+			"id": "aac1498d63db410fbb69ae54d0715f03"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "NOTIFY_R2",
+			"bucket_name": "notify-files"
+		}
+	],
 	"env": {
 		"staging": {
 			"name": "nuxt-notify-staging",
@@ -67,6 +83,18 @@
 					"binding": "INTERNAL_SHARED_SECRET",
 					"store_id": "bd7bc91a3e5f4111add4acf6cb4b8733",
 					"secret_name": "INTERNAL_SHARED_SECRET"
+				}
+			],
+			"kv_namespaces": [
+				{
+					"binding": "NOTIFY_VIEW_KV",
+					"id": "22512843c2a44fb8a60f993089080632"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "NOTIFY_R2",
+					"bucket_name": "notify-files-staging"
 				}
 			]
 		}
