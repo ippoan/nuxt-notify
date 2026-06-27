@@ -12,7 +12,14 @@ const config = useRuntimeConfig()
 const apiBase = config.public.apiBase as string
 
 const token = computed(() => String(route.params.token))
-const fileUrl = computed(() => `${apiBase}/api/notify/v/${token.value}/file`)
+
+// viewer 配信元 (#434 移行): まず同一オリジン (nuxt-notify Worker = KV+R2) を試し、
+// KV 未登録 (= #455 deploy 前の古い token) なら rust にフォールバックする。
+// '' = 同一オリジン / apiBase = rust。null = 未解決。
+const resolvedBase = ref<string | null>(null)
+const fileUrl = computed(() =>
+  resolvedBase.value === null ? '' : `${resolvedBase.value}/api/notify/v/${token.value}/file`,
+)
 
 interface ViewMetadata {
   file_name: string | null
@@ -21,6 +28,8 @@ interface ViewMetadata {
   source_sender: string | null
   source_received_at: string | null
   expire_at: string
+  // Worker (同一オリジン) のメタは content_type を含む (rust fallback は含まない)
+  content_type?: string | null
 }
 
 const meta = ref<ViewMetadata | null>(null)
@@ -60,21 +69,34 @@ function formatDate(s: string | null): string {
 
 async function load() {
   try {
-    const res = await fetch(`${apiBase}/api/notify/v/${token.value}`)
+    // 同一オリジン (Worker/KV) を優先。404 (KV 未登録) / 503 (binding 未設定) は
+    // rust にフォールバック。410 (失効) / その他はそのまま扱う。
+    let base = ''
+    let res = await fetch(`/api/notify/v/${token.value}`)
+    if (res.status === 404 || res.status === 503) {
+      base = apiBase
+      res = await fetch(`${apiBase}/api/notify/v/${token.value}`)
+    }
     if (res.status === 410) { status.value = 'gone'; return }
     if (res.status === 404) { status.value = 'not_found'; return }
     if (!res.ok) { status.value = 'error'; return }
     meta.value = await res.json()
-    // 並行で実体の Content-Type を HEAD で取る (PDF / JPEG 切替判定)。
-    // HEAD が失敗したり Content-Type が不明だったら fileContentType=null のまま
+    resolvedBase.value = base
+    // Worker メタは content_type を含むので HEAD 不要。rust fallback は含まないので
+    // 実体の Content-Type を HEAD で取る (PDF / JPEG 切替判定)。取れなければ null のまま
     // → 「ファイルを開く」ボタン (default ブランチ) に倒す。
-    try {
-      const head = await fetch(fileUrl.value, { method: 'HEAD' })
-      if (head.ok) {
-        fileContentType.value = head.headers.get('content-type')?.toLowerCase() ?? null
+    const ct = meta.value.content_type
+    if (ct) {
+      fileContentType.value = ct.toLowerCase()
+    } else {
+      try {
+        const head = await fetch(fileUrl.value, { method: 'HEAD' })
+        if (head.ok) {
+          fileContentType.value = head.headers.get('content-type')?.toLowerCase() ?? null
+        }
+      } catch {
+        // ignore — file-name ベース推測はしない (古い情報の方が有害)
       }
-    } catch {
-      // ignore — fallback to file-name based detection はしない (古い情報の方が有害)
     }
     status.value = 'ok'
   } catch {
