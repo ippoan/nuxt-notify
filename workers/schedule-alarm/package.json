@@ -6,7 +6,7 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
