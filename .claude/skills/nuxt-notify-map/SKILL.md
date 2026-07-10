@@ -2,14 +2,15 @@
 name: nuxt-notify-map
 generated-from: nuxt-notify:498d98203156348e234f9d28f9cf1665469c4cb4
 paths: [app/, server/, workers/]
-description: ippoan/nuxt-notify (文書配信・メール受信・墨消し通知 PWA、Nuxt 4 + Cloudflare Workers) の構造ナビゲーション。frontend pages / 2 つの補助 Worker (email-receiver / realtime-bus DO) / 墨消し WebSocket 通知の配置と prod/staging 構成・gotcha を 1 枚にまとめる。トリガー:「nuxt-notify」「notify.ippoan.org」「メール受信」「email-receiver」「realtime-bus」「RedactBus」「墨消し」「redaction」「LINE WORKS 配信」「公文書配信」「v/[token]」等。
+description: ippoan/nuxt-notify (文書配信・メール受信・墨消し通知 PWA、Nuxt 4 + Cloudflare Workers) の構造ナビゲーション。frontend pages / 3 つの補助 Worker (email-receiver / realtime-bus DO / schedule-alarm DO) / 墨消し WebSocket 通知の配置と prod/staging 構成・gotcha を 1 枚にまとめる。トリガー:「nuxt-notify」「notify.ippoan.org」「メール受信」「email-receiver」「realtime-bus」「RedactBus」「schedule-alarm」「ScheduleAlarmDO」「通知予約 発火」「墨消し」「redaction」「LINE WORKS 配信」「公文書配信」「v/[token]」等。
 ---
 
 # nuxt-notify-map — ippoan/nuxt-notify 構造ナビゲーション
 
 文書配信・メール受信・墨消し通知ツール。Nuxt 4 (`cloudflare_module`) frontend +
-**2 つの補助 Worker** (workers/)。frontend は backend rust-alc-api を叩き、墨消し完了は
-realtime-bus Worker の WebSocket で push される。
+**3 つの補助 Worker** (workers/)。frontend は backend rust-alc-api を叩き、墨消し完了は
+realtime-bus Worker の WebSocket で push される。schedule-alarm は rust-alc-api の
+trouble 通知予約の発火基盤 (DO Alarm)。
 
 > 細部は repo 側が正。ここは索引。`generated-from` が現在の tree-sha とズレたら
 > session-start-skill-coverage hook が再生成を促す。
@@ -26,6 +27,7 @@ realtime-bus Worker の WebSocket で push される。
 | **server route** | `server/api/proxy/[...path].ts` | 認証付き REST proxy。`@ippoan/auth-client/server` の `createAuthWorkerProxyHandler` で auth-worker `/alc-proxy/*` に service binding thin-forward (#434 step 3 方式 B)。introspect / ACL / OIDC mint / X-Tenant-ID + X-User-* 注入は auth-worker 側に集約。consumer は X-Alc-Proxy-Secret (=INTERNAL_SHARED_SECRET) + browser JWT のみ。AUTH_WORKER service binding + INTERNAL_SHARED_SECRET 必須 |
 | **Worker: email-receiver** | `workers/email-receiver/src/index.ts` | Cloudflare Email Routing 受信 → host で prod/staging 振り分け → backend ingest に POST (PostalMime で parse) |
 | **Worker: realtime-bus** | `workers/realtime-bus/src/{index,redact-bus,jwt}.ts` | 墨消し完了の DO fan-out。`POST /broadcast` (backend push) / `GET /subscribe` (browser WS)。`RedactBus` DO は hibernation 対応 |
+| **Worker: schedule-alarm** | `workers/schedule-alarm/src/{index,alarm-do,logic}.ts` | trouble 通知予約の発火基盤 (Refs ippoan/rust-alc-api#550)。`PUT/DELETE /alarms/{uuid}` (X-Alarm-Secret) → `ScheduleAlarmDO` (1 予約=1 DO=1 alarm)。alarm() は auth-worker service binding `/alc-internal-proxy` 経由で rust-alc-api internal fire を叩く (2xx/404=done、他は backoff retry 上限 5) |
 
 ## entrypoint
 

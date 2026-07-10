@@ -1,0 +1,78 @@
+name: Schedule Alarm Worker CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/schedule-alarm/**'
+      - '.github/workflows/schedule-alarm-deploy.yml'
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+    paths:
+      - 'workers/schedule-alarm/**'
+      - '.github/workflows/schedule-alarm-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  ci:
+    uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
+    with:
+      project_type: 'worker'
+      working_directory: 'workers/schedule-alarm'
+      # monorepo unit worker。pending/traffic-report を per-worker
+      # (`traffic::<repo>::notify-schedule-alarm`) で記録 (realtime-bus と同様)。
+      report_worker_name: notify-schedule-alarm
+      cache_dependency_path: 'workers/schedule-alarm/package-lock.json'
+      install_command: 'npm install'
+      typecheck_command: 'npx tsc --noEmit'
+      test_command: 'npx vitest run'
+      deploy_staging_script: 'npx wrangler deploy --env staging --config wrangler.toml'
+      deploy_release_script: 'npx wrangler deploy --config wrangler.toml'
+      has_integration: false
+      has_tests: true
+      has_deploy: true
+      has_staging_deploy: true
+      # wrangler.toml が [[secrets_store_secrets]] を含むので secret-verify を opt-in。
+      # frontend-ci.yml は wrangler_path 入力を持たないため autodetect (root の
+      # wrangler.jsonc、"secrets": {"required": []} 宣言済み) で gate が pass する
+      # (realtime-bus-deploy.yml の注記と同じ制約)。
+      gcp_secret_verify_project: cloudsql-sv
+      gcp_secret_verify_provider: ${{ vars.GCP_WIF_PROVIDER }}
+      gcp_secret_verify_sa: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_STAGING }}
+    secrets: inherit
+
+  # staging deploy 後、認証なし PUT が 401 で返ることを確認する fail-closed smoke。
+  # secret 値そのものは CI に置かない (値レスで検証できる項目だけ見る):
+  #   401 = worker 稼働 + SCHEDULE_ALARM_SECRET binding 解決 OK (fail-closed 動作)
+  #   503 = Secrets Store binding が空 (= 投入漏れ / drift) → loud fail
+  smoke-staging-fail-closed:
+    name: Smoke fail-closed on staging
+    needs: ci
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: PUT /alarms without secret expects 401
+        run: |
+          set -eu
+          http=$(curl -sS -o /tmp/body -w "%{http_code}" -X PUT \
+            "https://alarm.notify-staging.ippoan.org/alarms/00000000-0000-0000-0000-000000000000" \
+            -H "Content-Type: application/json" \
+            --data-binary '{"fire_at":"2027-01-01T00:00:00Z"}')
+          echo "HTTP $http"
+          head -c 300 /tmp/body || true
+          echo
+          if [ "$http" = "503" ]; then
+            echo "::error::SCHEDULE_ALARM_SECRET binding is empty on staging — check CF Secrets Store entry schedule-alarm-secret-staging (secrets-inventory get_drift)"
+            exit 1
+          fi
+          if [ "$http" != "401" ]; then
+            echo "::error::expected 401 (fail-closed), got HTTP $http"
+            exit 1
+          fi
+          echo "::notice::fail-closed OK (401 without secret)"

@@ -1,0 +1,76 @@
+name = "notify-schedule-alarm"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+account_id = "24b45709d060d957340180e995f0d373"
+
+# Worker のリクエスト/イベントログを Cloudflare Dashboard の Observability タブに保存。
+# alarm 発火・retry・fire 結果の追跡用 (Refs ippoan/rust-alc-api#550)。
+# observability は inheritable key なので env.staging にも継承される。
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
+# 本番ルート: alarm.notify.ippoan.org
+# rust-alc-api (SCHEDULE_ALARM_URL) → PUT/DELETE /alarms/{schedule_id}
+routes = [
+  { pattern = "alarm.notify.ippoan.org", custom_domain = true }
+]
+
+[durable_objects]
+bindings = [
+  { name = "SCHEDULE_ALARM", class_name = "ScheduleAlarmDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ScheduleAlarmDO"]
+
+# alarm() 発火時の fire 呼び出しは auth-worker (service binding) に OIDC mint を
+# 委譲する (/alc-internal-proxy、aud=alc-api-internal)。公開 URL を経由しない。
+[[services]]
+binding = "AUTH_WORKER"
+service = "auth-worker"
+
+# 必須 secret は CF Secrets Store binding 経由 (realtime-bus と同規約)。
+# 値の更新は GCP Secret Manager に投入 → secrets-inventory が CF に伝播。
+# `wrangler secret put` は使わない (get_drift から見えない false negative 防止)。
+#
+#   SCHEDULE_ALARM_SECRET       — rust-alc-api → 本 worker の X-Alarm-Secret
+#   ALARM_PROXY_SECRET          — 本 worker → auth-worker の X-Alc-Proxy-Secret
+#                                 (auth-worker 側 binding 名は
+#                                  INTERNAL_SHARED_SECRET_SCHEDULE_ALARM)
+
+[[secrets_store_secrets]]
+binding = "SCHEDULE_ALARM_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "schedule-alarm-secret"
+
+[[secrets_store_secrets]]
+binding = "ALARM_PROXY_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "internal-shared-secret-schedule-alarm"
+
+[env.staging]
+name = "notify-schedule-alarm-staging"
+routes = [
+  { pattern = "alarm.notify-staging.ippoan.org", custom_domain = true }
+]
+
+[env.staging.durable_objects]
+bindings = [
+  { name = "SCHEDULE_ALARM", class_name = "ScheduleAlarmDO" }
+]
+
+[[env.staging.services]]
+binding = "AUTH_WORKER"
+service = "auth-worker-staging"
+
+[[env.staging.secrets_store_secrets]]
+binding = "SCHEDULE_ALARM_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "schedule-alarm-secret-staging"
+
+[[env.staging.secrets_store_secrets]]
+binding = "ALARM_PROXY_SECRET"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "internal-shared-secret-schedule-alarm-staging"
