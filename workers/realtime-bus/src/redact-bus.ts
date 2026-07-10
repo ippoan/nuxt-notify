@@ -11,10 +11,12 @@
 
 import { DurableObject } from "cloudflare:workers";
 
+import type { SecretBinding } from "./secret";
+
 interface Env {
   REDACT_BUS: DurableObjectNamespace;
   JWT_SECRET: string;
-  NOTIFY_REDACT_BROADCAST_SECRET: string;
+  NOTIFY_REDACT_BROADCAST_SECRET: SecretBinding;
 }
 
 export class RedactBus extends DurableObject<Env> {
