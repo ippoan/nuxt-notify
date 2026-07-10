@@ -1,15 +1,18 @@
 import PostalMime from "postal-mime";
 
+import { resolveSecret, type SecretBinding } from "./secret";
+
 export interface Env {
   /** 本番 ingest エンドポイント (notify.ippoan.org 用) */
   INGEST_ENDPOINT: string;
-  /** 本番 backend と共有する shared secret (wrangler secret put NOTIFY_WORKER_SECRET) */
-  NOTIFY_WORKER_SECRET: string;
+  /** 本番 backend と共有する shared secret (CF Secrets Store binding —
+   *  wrangler 4 では { get(): Promise<string> } オブジェクト、Refs #105) */
+  NOTIFY_WORKER_SECRET: SecretBinding;
 
   /** staging ingest エンドポイント (notify-staging.ippoan.org 用、任意) */
   INGEST_ENDPOINT_STAGING?: string;
   /** staging backend と共有する shared secret (任意、staging host を受ける時のみ必要) */
-  NOTIFY_WORKER_SECRET_STAGING?: string;
+  NOTIFY_WORKER_SECRET_STAGING?: SecretBinding;
 
   /** 本番ホスト名 (デフォルト notify.ippoan.org) */
   PROD_HOST?: string;
@@ -25,7 +28,13 @@ interface RouteTarget {
   secret: string;
 }
 
-export function pickRoute(host: string, env: Env): RouteTarget | null {
+/** pickRoute には secret を string に解決済みの env を渡す (pure に保ちテスト可能に)。 */
+export type ResolvedSecretsEnv = Omit<Env, "NOTIFY_WORKER_SECRET" | "NOTIFY_WORKER_SECRET_STAGING"> & {
+  NOTIFY_WORKER_SECRET: string;
+  NOTIFY_WORKER_SECRET_STAGING?: string;
+};
+
+export function pickRoute(host: string, env: ResolvedSecretsEnv): RouteTarget | null {
   const prodHost = (env.PROD_HOST ?? "notify.ippoan.org").toLowerCase();
   const stagingHost = (env.STAGING_HOST ?? "notify-staging.ippoan.org").toLowerCase();
   const h = host.toLowerCase();
@@ -72,7 +81,13 @@ export default {
     }
 
     // host → (endpoint, secret) を選択。未対応 host は silent drop。
-    const route = pickRoute(host, env);
+    // Secrets Store binding を string に解決してから pure な pickRoute に渡す。
+    const route = pickRoute(host, {
+      ...env,
+      NOTIFY_WORKER_SECRET: (await resolveSecret(env.NOTIFY_WORKER_SECRET)) ?? "",
+      NOTIFY_WORKER_SECRET_STAGING:
+        (await resolveSecret(env.NOTIFY_WORKER_SECRET_STAGING)) ?? undefined,
+    });
     if (!route) {
       return;
     }

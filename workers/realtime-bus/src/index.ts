@@ -9,13 +9,16 @@
 
 import { RedactBus } from "./redact-bus";
 import { verifyJwt } from "./jwt";
+import { resolveSecret, type SecretBinding } from "./secret";
 
 export { RedactBus };
 
 interface Env {
   REDACT_BUS: DurableObjectNamespace;
   JWT_SECRET: string;
-  NOTIFY_REDACT_BROADCAST_SECRET: string;
+  // CF Secrets Store binding — wrangler 4 では { get(): Promise<string> } オブジェクト
+  // として注入される (string 直読みは不可、Refs #105)。
+  NOTIFY_REDACT_BROADCAST_SECRET: SecretBinding;
 }
 
 interface BroadcastPayload {
@@ -53,7 +56,7 @@ export default {
     // --- /broadcast (rust-alc-api → DO fan-out) ---
     if (url.pathname === "/broadcast" && req.method === "POST") {
       const provided = req.headers.get("X-Broadcast-Secret") ?? "";
-      const expected = env.NOTIFY_REDACT_BROADCAST_SECRET ?? "";
+      const expected = await resolveSecret(env.NOTIFY_REDACT_BROADCAST_SECRET);
       if (!expected || !constantTimeEqualStr(provided, expected)) {
         return new Response("invalid signature", { status: 401 });
       }
