@@ -1,51 +1,73 @@
-name: Schedule Alarm Worker CI
+name: schedule-alarm DO worker
+
+# notify-schedule-alarm は ScheduleAlarmDO (Durable Object + new_sqlite_classes
+# migration) を定義する独立 worker (Refs ippoan/rust-alc-api#550, #102)。
+#
+# DO migration を含む version は `wrangler versions upload` では deploy できない
+# (Cloudflare error 10211: migration は non-versioned deployment 必須。未 deploy の
+# 新規 worker では "worker does not exist" になる — v0.0.30 tag run で実証)。よって
+# この worker だけは frontend-ci.yml を使わず bespoke に `wrangler deploy` する。
+# frontend-ci の release script は `${CMD//wrangler deploy/wrangler versions upload}`
+# で global 置換するため、frontend-ci 経由にすると migration deploy が壊れる
+# (durable-object-worker skill / nuxt-items items-sync-deploy.yml と同パターン)。
+#
+# pull_request: typecheck + test (coverage 100% gate) のみ実行し deploy は skip。
+# push(main/tag) / workflow_dispatch: 上記 gate に加えて deploy を実行。
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths:
       - 'workers/schedule-alarm/**'
       - '.github/workflows/schedule-alarm-deploy.yml'
-    tags: ['v*']
   pull_request:
-    branches: [main]
     paths:
       - 'workers/schedule-alarm/**'
       - '.github/workflows/schedule-alarm-deploy.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
-  ci:
-    uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
-    with:
-      project_type: 'worker'
-      working_directory: 'workers/schedule-alarm'
-      # monorepo unit worker。pending/traffic-report を per-worker
-      # (`traffic::<repo>::notify-schedule-alarm`) で記録 (realtime-bus と同様)。
-      report_worker_name: notify-schedule-alarm
-      cache_dependency_path: 'workers/schedule-alarm/package-lock.json'
-      install_command: 'npm install'
-      typecheck_command: 'npx tsc --noEmit'
-      test_command: 'npx vitest run'
-      deploy_staging_script: 'npx wrangler deploy --env staging --config wrangler.toml'
-      deploy_release_script: 'npx wrangler deploy --config wrangler.toml'
-      has_integration: false
-      has_tests: true
-      has_deploy: true
-      has_staging_deploy: true
-      # wrangler.toml が [[secrets_store_secrets]] を含むので secret-verify を opt-in。
-      # frontend-ci.yml は wrangler_path 入力を持たないため autodetect (root の
-      # wrangler.jsonc、"secrets": {"required": []} 宣言済み) で gate が pass する
-      # (realtime-bus-deploy.yml の注記と同じ制約)。
-      gcp_secret_verify_project: cloudsql-sv
-      gcp_secret_verify_provider: ${{ vars.GCP_WIF_PROVIDER }}
-      gcp_secret_verify_sa: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_STAGING }}
-    secrets: inherit
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/schedule-alarm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # vitest.config.ts の coverage.thresholds=100 で src/logic.ts / src/secret.ts
+      # (pure ロジック) が 100% 未満なら non-zero exit → gate fail。
+      - name: Test (coverage 100% gate)
+        run: npx vitest run --coverage
+
+      # tag push (v*) → prod、それ以外 (main push / workflow_dispatch) → staging。
+      # DO migration があるため versions upload ではなく wrangler deploy を使う。
+      # pull_request では deploy しない (gate のみ)。
+      - name: Deploy (staging)
+        if: github.event_name != 'pull_request' && github.ref_type != 'tag'
+        run: npx wrangler deploy --env staging --config wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy (production)
+        if: github.event_name != 'pull_request' && github.ref_type == 'tag'
+        run: npx wrangler deploy --config wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
   # staging deploy 後、認証なし PUT が 401 で返ることを確認する fail-closed smoke。
   # secret 値そのものは CI に置かない (値レスで検証できる項目だけ見る):
@@ -53,8 +75,8 @@ jobs:
   #   503 = Secrets Store binding が空 (= 投入漏れ / drift) → loud fail
   smoke-staging-fail-closed:
     name: Smoke fail-closed on staging
-    needs: ci
-    if: success()
+    needs: deploy
+    if: github.event_name != 'pull_request' && github.ref_type != 'tag'
     runs-on: ubuntu-latest
     steps:
       - name: PUT /alarms without secret expects 401
