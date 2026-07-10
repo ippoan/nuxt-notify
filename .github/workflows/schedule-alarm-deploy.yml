@@ -49,7 +49,7 @@ jobs:
 
   # staging deploy 後、認証なし PUT が 401 で返ることを確認する fail-closed smoke。
   # secret 値そのものは CI に置かない (値レスで検証できる項目だけ見る):
-  #   401 = worker 稼働 + SCHEDULE_ALARM_SECRET binding 解決 OK (fail-closed 動作)
+  #   401 = worker 稼働 + INTERNAL_SHARED_SECRET binding 解決 OK (fail-closed 動作)
   #   503 = Secrets Store binding が空 (= 投入漏れ / drift) → loud fail
   smoke-staging-fail-closed:
     name: Smoke fail-closed on staging
@@ -68,7 +68,7 @@ jobs:
           head -c 300 /tmp/body || true
           echo
           if [ "$http" = "503" ]; then
-            echo "::error::SCHEDULE_ALARM_SECRET binding is empty on staging — check CF Secrets Store entry schedule-alarm-secret-staging (secrets-inventory get_drift)"
+            echo "::error::INTERNAL_SHARED_SECRET binding is empty on staging — check CF Secrets Store entry INTERNAL_SHARED_SECRET (secrets-inventory get_drift)"
             exit 1
           fi
           if [ "$http" != "401" ]; then

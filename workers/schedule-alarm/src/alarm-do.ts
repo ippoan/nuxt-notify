@@ -19,8 +19,7 @@ import {
 interface Env {
   SCHEDULE_ALARM: DurableObjectNamespace;
   AUTH_WORKER: Fetcher;
-  SCHEDULE_ALARM_SECRET: string;
-  ALARM_PROXY_SECRET: string;
+  INTERNAL_SHARED_SECRET: string;
 }
 
 const STATE_KEY = "state";
@@ -70,12 +69,13 @@ export class ScheduleAlarmDO extends DurableObject<Env> {
     try {
       // auth-worker /alc-internal-proxy が OIDC (aud=alc-api-internal) を mint して
       // rust-alc-api の internal fire に forward する。host は service binding の
-      // ため任意 (auth-worker 側は path で判定)。
+      // ため任意 (auth-worker 側は path で判定)。consumer proof は既存
+      // INTERNAL_SHARED_SECRET の再利用 (専用 secret は持たない)。
       const res = await this.env.AUTH_WORKER.fetch(
         `https://auth-worker.internal/alc-internal-proxy/api/internal/trouble/schedules/${state.schedule_id}/fire`,
         {
           method: "POST",
-          headers: { "X-Alc-Proxy-Secret": this.env.ALARM_PROXY_SECRET ?? "" },
+          headers: { "X-Alc-Proxy-Secret": this.env.INTERNAL_SHARED_SECRET ?? "" },
         },
       );
       status = res.status;

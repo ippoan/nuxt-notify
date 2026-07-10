@@ -6,8 +6,9 @@
 //   PUT    /alarms/{schedule_id}  body {"fire_at": "<RFC3339>"} — alarm 登録 (上書き可)
 //   DELETE /alarms/{schedule_id}                                — alarm 解除 (冪等)
 //
-// 認証: X-Alarm-Secret を SCHEDULE_ALARM_SECRET (CF Secrets Store binding) と
-// constant-time 比較。未設定は fail-closed (503)。
+// 認証: X-Internal-Shared-Secret を INTERNAL_SHARED_SECRET (CF Secrets Store binding、
+// rust-alc-api の同名 env と物理共有) と constant-time 比較。未設定は fail-closed (503)。
+// 専用 secret は持たない (既存 INTERNAL_SHARED_SECRET 再利用、Refs ippoan/rust-alc-api#550)。
 // 発火時の fire 呼び出しは alarm-do.ts が auth-worker service binding に委譲する。
 
 import { ScheduleAlarmDO } from "./alarm-do";
@@ -18,8 +19,7 @@ export { ScheduleAlarmDO };
 interface Env {
   SCHEDULE_ALARM: DurableObjectNamespace;
   AUTH_WORKER: Fetcher;
-  SCHEDULE_ALARM_SECRET: string;
-  ALARM_PROXY_SECRET: string;
+  INTERNAL_SHARED_SECRET: string;
 }
 
 const ALARMS_PREFIX = "/alarms/";
@@ -36,11 +36,11 @@ export default {
     }
 
     // --- 認証 (fail-closed) ---
-    const expected = env.SCHEDULE_ALARM_SECRET ?? "";
+    const expected = env.INTERNAL_SHARED_SECRET ?? "";
     if (!expected) {
       return new Response("secret not configured", { status: 503 });
     }
-    const provided = req.headers.get("X-Alarm-Secret") ?? "";
+    const provided = req.headers.get("X-Internal-Shared-Secret") ?? "";
     if (!constantTimeEqualStr(provided, expected)) {
       return new Response("unauthorized", { status: 401 });
     }

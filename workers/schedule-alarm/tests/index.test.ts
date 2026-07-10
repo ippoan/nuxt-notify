@@ -13,8 +13,8 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
     env: {
       SCHEDULE_ALARM: namespace,
       AUTH_WORKER: { fetch: vi.fn() },
-      SCHEDULE_ALARM_SECRET: "test-secret",
-      ALARM_PROXY_SECRET: "proxy-secret",
+      INTERNAL_SHARED_SECRET: "test-secret",
+      
       ...overrides,
     } as any,
     namespace,
@@ -24,7 +24,7 @@ function makeEnv(overrides: Record<string, unknown> = {}) {
 
 function put(path: string, secret: string | null, body?: unknown) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (secret !== null) headers["X-Alarm-Secret"] = secret;
+  if (secret !== null) headers["X-Internal-Shared-Secret"] = secret;
   return new Request(`https://alarm.example${path}`, {
     method: "PUT",
     headers,
@@ -34,7 +34,7 @@ function put(path: string, secret: string | null, body?: unknown) {
 
 describe("auth", () => {
   it("fails closed when secret binding is empty", async () => {
-    const { env } = makeEnv({ SCHEDULE_ALARM_SECRET: "" });
+    const { env } = makeEnv({ INTERNAL_SHARED_SECRET: "" });
     const res = await worker.fetch(put(`/alarms/${UUID}`, "whatever", { fire_at: "2027-01-01T00:00:00Z" }), env);
     expect(res.status).toBe(503);
   });
@@ -94,7 +94,7 @@ describe("forwarding to DO", () => {
     const { env, doFetch } = makeEnv();
     const req = new Request(`https://alarm.example/alarms/${UUID}`, {
       method: "DELETE",
-      headers: { "X-Alarm-Secret": "test-secret" },
+      headers: { "X-Internal-Shared-Secret": "test-secret" },
     });
     await worker.fetch(req, env);
     const [, init] = doFetch.mock.calls[0]!;

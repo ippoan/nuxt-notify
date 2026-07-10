@@ -31,24 +31,18 @@ new_sqlite_classes = ["ScheduleAlarmDO"]
 binding = "AUTH_WORKER"
 service = "auth-worker"
 
-# 必須 secret は CF Secrets Store binding 経由 (realtime-bus と同規約)。
-# 値の更新は GCP Secret Manager に投入 → secrets-inventory が CF に伝播。
-# `wrangler secret put` は使わない (get_drift から見えない false negative 防止)。
-#
-#   SCHEDULE_ALARM_SECRET       — rust-alc-api → 本 worker の X-Alarm-Secret
-#   ALARM_PROXY_SECRET          — 本 worker → auth-worker の X-Alc-Proxy-Secret
-#                                 (auth-worker 側 binding 名は
-#                                  INTERNAL_SHARED_SECRET_SCHEDULE_ALARM)
+# 専用 secret は持たず、既存の INTERNAL_SHARED_SECRET を再利用する (user 判断
+# 2026-07-10、Refs ippoan/rust-alc-api#550)。同じ 1 binding を
+#   - 入口: rust-alc-api からの `X-Internal-Shared-Secret` 検証
+#   - 出口: auth-worker /alc-internal-proxy への `X-Alc-Proxy-Secret`
+# の両方に使う。entry は alc-app / carins / dtako-logs / nuxt-notify frontend と
+# 物理共有 (prod/staging 統合済み)。値の rotate は secrets-inventory 経由
+# (`wrangler secret put` は使わない)。
 
 [[secrets_store_secrets]]
-binding = "SCHEDULE_ALARM_SECRET"
+binding = "INTERNAL_SHARED_SECRET"
 store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
-secret_name = "schedule-alarm-secret"
-
-[[secrets_store_secrets]]
-binding = "ALARM_PROXY_SECRET"
-store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
-secret_name = "internal-shared-secret-schedule-alarm"
+secret_name = "INTERNAL_SHARED_SECRET"
 
 [env.staging]
 name = "notify-schedule-alarm-staging"
@@ -66,11 +60,6 @@ binding = "AUTH_WORKER"
 service = "auth-worker-staging"
 
 [[env.staging.secrets_store_secrets]]
-binding = "SCHEDULE_ALARM_SECRET"
+binding = "INTERNAL_SHARED_SECRET"
 store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
-secret_name = "schedule-alarm-secret-staging"
-
-[[env.staging.secrets_store_secrets]]
-binding = "ALARM_PROXY_SECRET"
-store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
-secret_name = "internal-shared-secret-schedule-alarm-staging"
+secret_name = "INTERNAL_SHARED_SECRET"

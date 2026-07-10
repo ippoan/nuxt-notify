@@ -27,7 +27,7 @@ trouble 通知予約の発火基盤 (DO Alarm)。
 | **server route** | `server/api/proxy/[...path].ts` | 認証付き REST proxy。`@ippoan/auth-client/server` の `createAuthWorkerProxyHandler` で auth-worker `/alc-proxy/*` に service binding thin-forward (#434 step 3 方式 B)。introspect / ACL / OIDC mint / X-Tenant-ID + X-User-* 注入は auth-worker 側に集約。consumer は X-Alc-Proxy-Secret (=INTERNAL_SHARED_SECRET) + browser JWT のみ。AUTH_WORKER service binding + INTERNAL_SHARED_SECRET 必須 |
 | **Worker: email-receiver** | `workers/email-receiver/src/index.ts` | Cloudflare Email Routing 受信 → host で prod/staging 振り分け → backend ingest に POST (PostalMime で parse) |
 | **Worker: realtime-bus** | `workers/realtime-bus/src/{index,redact-bus,jwt}.ts` | 墨消し完了の DO fan-out。`POST /broadcast` (backend push) / `GET /subscribe` (browser WS)。`RedactBus` DO は hibernation 対応 |
-| **Worker: schedule-alarm** | `workers/schedule-alarm/src/{index,alarm-do,logic}.ts` | trouble 通知予約の発火基盤 (Refs ippoan/rust-alc-api#550)。`PUT/DELETE /alarms/{uuid}` (X-Alarm-Secret) → `ScheduleAlarmDO` (1 予約=1 DO=1 alarm)。alarm() は auth-worker service binding `/alc-internal-proxy` 経由で rust-alc-api internal fire を叩く (2xx/404=done、他は backoff retry 上限 5) |
+| **Worker: schedule-alarm** | `workers/schedule-alarm/src/{index,alarm-do,logic}.ts` | trouble 通知予約の発火基盤 (Refs ippoan/rust-alc-api#550)。`PUT/DELETE /alarms/{uuid}` (X-Internal-Shared-Secret = 既存 INTERNAL_SHARED_SECRET 再利用、専用 secret なし) → `ScheduleAlarmDO` (1 予約=1 DO=1 alarm)。alarm() は auth-worker service binding `/alc-internal-proxy` 経由で rust-alc-api internal fire を叩く (2xx/404=done、他は backoff retry 上限 5) |
 
 ## entrypoint
 

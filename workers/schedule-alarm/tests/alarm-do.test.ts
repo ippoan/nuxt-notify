@@ -27,7 +27,7 @@ function makeDo(fireStatus: number | Error) {
   });
   const env = {
     AUTH_WORKER: { fetch: authFetch },
-    ALARM_PROXY_SECRET: "proxy-secret",
+    INTERNAL_SHARED_SECRET: "proxy-secret",
   } as any;
   const dobj = new (ScheduleAlarmDO as any)(ctx, env) as ScheduleAlarmDO;
   return { dobj, ctx, authFetch };
