@@ -15,11 +15,12 @@ import {
   MAX_ATTEMPTS,
   type AlarmState,
 } from "./logic";
+import { resolveSecret, type SecretBinding } from "./secret";
 
 interface Env {
   SCHEDULE_ALARM: DurableObjectNamespace;
   AUTH_WORKER: Fetcher;
-  INTERNAL_SHARED_SECRET: string;
+  INTERNAL_SHARED_SECRET: SecretBinding;
 }
 
 const STATE_KEY = "state";
@@ -71,11 +72,12 @@ export class ScheduleAlarmDO extends DurableObject<Env> {
       // rust-alc-api の internal fire に forward する。host は service binding の
       // ため任意 (auth-worker 側は path で判定)。consumer proof は既存
       // INTERNAL_SHARED_SECRET の再利用 (専用 secret は持たない)。
+      const proxySecret = await resolveSecret(this.env.INTERNAL_SHARED_SECRET);
       const res = await this.env.AUTH_WORKER.fetch(
         `https://auth-worker.internal/alc-internal-proxy/api/internal/trouble/schedules/${state.schedule_id}/fire`,
         {
           method: "POST",
-          headers: { "X-Alc-Proxy-Secret": this.env.INTERNAL_SHARED_SECRET ?? "" },
+          headers: { "X-Alc-Proxy-Secret": proxySecret ?? "" },
         },
       );
       status = res.status;

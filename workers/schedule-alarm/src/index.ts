@@ -13,13 +13,14 @@
 
 import { ScheduleAlarmDO } from "./alarm-do";
 import { constantTimeEqualStr, isValidUuid, parseFireAt } from "./logic";
+import { resolveSecret, type SecretBinding } from "./secret";
 
 export { ScheduleAlarmDO };
 
 interface Env {
   SCHEDULE_ALARM: DurableObjectNamespace;
   AUTH_WORKER: Fetcher;
-  INTERNAL_SHARED_SECRET: string;
+  INTERNAL_SHARED_SECRET: SecretBinding;
 }
 
 const ALARMS_PREFIX = "/alarms/";
@@ -36,7 +37,7 @@ export default {
     }
 
     // --- 認証 (fail-closed) ---
-    const expected = env.INTERNAL_SHARED_SECRET ?? "";
+    const expected = await resolveSecret(env.INTERNAL_SHARED_SECRET);
     if (!expected) {
       return new Response("secret not configured", { status: 503 });
     }

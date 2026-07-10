@@ -3,18 +3,20 @@ main = "src/index.ts"
 compatibility_date = "2026-04-01"
 account_id = "24b45709d060d957340180e995f0d373"
 
+# 本番ルート: alarm.notify.ippoan.org
+# rust-alc-api (SCHEDULE_ALARM_URL) → PUT/DELETE /alarms/{schedule_id}
+# 注: routes は必ず [observability] より前に書く (後に書くと TOML 上
+# observability 配下のキーと解釈され wrangler が黙って落とす)。
+routes = [
+  { pattern = "alarm.notify.ippoan.org", custom_domain = true }
+]
+
 # Worker のリクエスト/イベントログを Cloudflare Dashboard の Observability タブに保存。
 # alarm 発火・retry・fire 結果の追跡用 (Refs ippoan/rust-alc-api#550)。
 # observability は inheritable key なので env.staging にも継承される。
 [observability]
 enabled = true
 head_sampling_rate = 1.0
-
-# 本番ルート: alarm.notify.ippoan.org
-# rust-alc-api (SCHEDULE_ALARM_URL) → PUT/DELETE /alarms/{schedule_id}
-routes = [
-  { pattern = "alarm.notify.ippoan.org", custom_domain = true }
-]
 
 [durable_objects]
 bindings = [
