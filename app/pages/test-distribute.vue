@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { distributableRecipients, providerClass, providerLabel, type RecipientProvider } from '~/utils/recipientProvider'
+
 const { apiFetch } = useApi()
 
 interface Recipient {
   id: string
   name: string
-  provider: 'line' | 'lineworks'
+  provider: RecipientProvider
   lineworks_user_id: string | null
   line_user_id: string | null
   phone_number: string | null
@@ -22,7 +24,7 @@ const loading = ref(true)
 const loadError = ref('')
 const selected = ref<Set<string>>(new Set())
 
-const enabledRecipients = computed(() => recipients.value.filter(r => r.enabled))
+const enabledRecipients = computed(() => distributableRecipients(recipients.value))
 
 async function loadRecipients() {
   loading.value = true
@@ -127,9 +129,9 @@ onMounted(loadRecipients)
                  @click.stop="toggle(r.id)"
                  class="w-4 h-4" />
           <span class="flex-1 text-sm">{{ r.name }}</span>
-          <span :class="r.provider === 'line' ? 'text-green-600' : 'text-blue-600'"
+          <span :class="providerClass(r.provider)"
                 class="text-xs font-medium">
-            {{ r.provider === 'line' ? 'LINE' : 'LINE WORKS' }}
+            {{ providerLabel(r.provider) }}
           </span>
         </li>
       </ul>
