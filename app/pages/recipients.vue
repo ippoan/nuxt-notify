@@ -1,5 +1,21 @@
 <script setup lang="ts">
+import {
+  addAlertMember,
+  alertCheckDisabledReason,
+  canResend,
+  emailStatusClass,
+  emailStatusLabel,
+  emailStatusNote,
+  loadAlertMembers,
+  loadEmailStatuses,
+  removeAlertMember,
+  resendVerification,
+  type EmailStatus,
+  type ApiFetch,
+} from '~/utils/alertRecipients'
+
 const { apiFetch } = useApi()
+const alertFetch = apiFetch as ApiFetch
 
 interface Recipient {
   id: string
@@ -27,6 +43,30 @@ const form = reactive({
   email: '',
 })
 
+// アルコール検知メールの受け取り手 (グループは画面に出さない) と送り先の状態
+const alertMembers = ref<Set<string>>(new Set())
+const emailStatuses = ref<Map<string, EmailStatus>>(new Map())
+const alertError = ref('')
+const resendResults = ref<Record<string, { ok: boolean; message: string }>>({})
+
+// 状態の取得失敗は一覧を潰さない (状態は「-」)。load の try とは別に包む。
+async function loadStatuses() {
+  try {
+    emailStatuses.value = await loadEmailStatuses(alertFetch)
+  } catch {
+    emailStatuses.value = new Map()
+  }
+}
+
+async function loadAlertState() {
+  try {
+    alertMembers.value = await loadAlertMembers(alertFetch)
+  } catch (e: any) {
+    alertMembers.value = new Set()
+    alertError.value = 'アルコール検知メールの受け取り手を読み込めませんでした: ' + (e.message || String(e))
+  }
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -37,6 +77,24 @@ async function load() {
   } finally {
     loading.value = false
   }
+  alertError.value = ''
+  await Promise.all([loadAlertState(), loadStatuses()])
+}
+
+async function toggleAlert(r: Recipient, checked: boolean) {
+  alertError.value = ''
+  try {
+    if (checked) await addAlertMember(alertFetch, r.id)
+    else await removeAlertMember(alertFetch, r.id)
+  } catch (e: any) {
+    alertError.value = 'アルコール検知メールの設定に失敗しました: ' + (e.message || String(e))
+  }
+  await loadAlertState()
+}
+
+async function resend(r: Recipient) {
+  resendResults.value = { ...resendResults.value, [r.id]: await resendVerification(alertFetch, r.id) }
+  await loadStatuses()
 }
 
 async function create() {
@@ -88,10 +146,12 @@ async function toggle(r: Recipient) {
 
 const editingId = ref<string | null>(null)
 const editName = ref('')
+const editEmail = ref('')
 
 function startEdit(r: Recipient) {
   editingId.value = r.id
   editName.value = r.name
+  editEmail.value = r.email ?? ''
 }
 
 async function saveName(r: Recipient) {
@@ -99,7 +159,7 @@ async function saveName(r: Recipient) {
   try {
     await apiFetch(`/notify/recipients/${r.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ name: editName.value.trim() }),
+      body: JSON.stringify({ name: editName.value.trim(), email: editEmail.value.trim() || null }),
     })
     editingId.value = null
     await load()
@@ -162,6 +222,8 @@ onMounted(load)
       </button>
     </div>
 
+    <div v-if="alertError" class="text-red-500 text-sm mb-2">{{ alertError }}</div>
+
     <!-- 一覧 -->
     <div v-if="loading" class="text-gray-500">読み込み中...</div>
     <div v-else-if="error" class="text-red-500">{{ error }}</div>
@@ -174,6 +236,8 @@ onMounted(load)
           <th class="px-4 py-2 text-left">プロバイダ</th>
           <th class="px-4 py-2 text-left">ID</th>
           <th class="px-4 py-2 text-left">電話番号</th>
+          <th class="px-4 py-2 text-left">メール</th>
+          <th class="px-4 py-2 text-center">アルコール検知メール</th>
           <th class="px-4 py-2 text-center">有効</th>
           <th class="px-4 py-2 text-center">操作</th>
         </tr>
@@ -181,9 +245,11 @@ onMounted(load)
       <tbody>
         <tr v-for="r in recipients" :key="r.id" class="border-t">
           <td class="px-4 py-2">
-            <div v-if="editingId === r.id" class="flex gap-1">
+            <div v-if="editingId === r.id" class="flex gap-1 items-center">
               <input v-model="editName" @keyup.enter="saveName(r)" @keyup.escape="cancelEdit"
-                     class="border rounded px-2 py-1 text-sm w-32" autofocus />
+                     class="border rounded px-2 py-1 text-sm w-32" placeholder="名前" autofocus />
+              <input v-model="editEmail" @keyup.enter="saveName(r)" @keyup.escape="cancelEdit"
+                     class="border rounded px-2 py-1 text-sm w-48" placeholder="メール" />
               <button @click="saveName(r)" class="text-green-600 text-xs">✓</button>
               <button @click="cancelEdit" class="text-gray-400 text-xs">✕</button>
             </div>
@@ -199,6 +265,29 @@ onMounted(load)
             {{ r.line_user_id || r.lineworks_user_id || '-' }}
           </td>
           <td class="px-4 py-2">{{ r.phone_number || '-' }}</td>
+          <td class="px-4 py-2">
+            <div v-if="r.email">{{ r.email }}</div>
+            <div v-else class="text-gray-400">-</div>
+            <template v-if="r.email">
+              <div :class="emailStatusClass(emailStatuses.get(r.id))" class="text-xs font-medium">
+                {{ emailStatusLabel(emailStatuses.get(r.id)) }}
+              </div>
+              <div v-if="emailStatusNote(emailStatuses.get(r.id))" class="text-xs text-gray-500">
+                {{ emailStatusNote(emailStatuses.get(r.id)) }}
+              </div>
+              <button v-if="canResend(emailStatuses.get(r.id))" @click="resend(r)"
+                      class="text-blue-600 hover:text-blue-800 text-xs underline">確認メールを再送</button>
+              <div v-if="resendResults[r.id]" class="text-xs"
+                   :class="resendResults[r.id]?.ok ? 'text-green-600' : 'text-red-500'">
+                {{ resendResults[r.id]?.message }}
+              </div>
+            </template>
+          </td>
+          <td class="px-4 py-2 text-center">
+            <input type="checkbox" :checked="alertMembers.has(r.id)" :disabled="!r.email"
+                   :title="alertCheckDisabledReason(r.email)"
+                   @change="toggleAlert(r, ($event.target as HTMLInputElement).checked)" />
+          </td>
           <td class="px-4 py-2 text-center">
             <button @click="toggle(r)" :class="r.enabled ? 'bg-green-500' : 'bg-gray-300'"
                     class="w-10 h-5 rounded-full relative transition-colors">

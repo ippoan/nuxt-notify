@@ -16,3 +16,7 @@ branches = true
 [[files]]
 path = "app/utils/folderWatchDb.ts"
 branches = true
+
+[[files]]
+path = "app/utils/alertRecipients.ts"
+branches = true
