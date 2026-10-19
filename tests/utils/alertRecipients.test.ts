@@ -12,6 +12,8 @@ import {
   emailStatusNote,
   canResend,
   resendVerification,
+  sendAlertTest,
+  alertTestMessage,
   alertCheckDisabledReason,
   type ApiFetch,
 } from '../../app/utils/alertRecipients'
@@ -226,5 +228,66 @@ describe('alertCheckDisabledReason', () => {
   })
   it('在れば空', () => {
     expect(alertCheckDisabledReason('a@example.com')).toBe('')
+  })
+})
+
+describe('sendAlertTest', () => {
+  const route = 'POST /measurements/alert-test'
+  const failWith = (err: unknown) =>
+    fakeFetch({
+      [route]: () => {
+        throw err
+      },
+    }).api
+
+  it('sent / failed を返す', async () => {
+    const { api, calls } = fakeFetch({ [route]: { sent: 3, failed: 1 } })
+    expect(await sendAlertTest(api)).toEqual({ ok: true, sent: 3, failed: 1 })
+    expect(calls[0]).toEqual({ path: '/measurements/alert-test', method: 'POST' })
+  })
+  it('failed が無ければ 0', async () => {
+    const { api } = fakeFetch({ [route]: { sent: 2 } })
+    expect(await sendAlertTest(api)).toEqual({ ok: true, sent: 2, failed: 0 })
+  })
+  it('想定外の 200 は汎用エラー', async () => {
+    for (const body of [null, {}]) {
+      const { api } = fakeFetch({ [route]: body })
+      expect(await sendAlertTest(api)).toEqual({ ok: false, message: 'テスト送信に失敗しました' })
+    }
+  })
+  it('403 forbidden (status / data / response どれでも)', async () => {
+    for (const err of [{ status: 403 }, { data: { error: 'forbidden' } }, { response: { _data: { error: 'forbidden' } } }]) {
+      expect(await sendAlertTest(failWith(err))).toEqual({ ok: false, message: '管理者だけが送れます' })
+    }
+  })
+  it('409 no_recipients', async () => {
+    for (const err of [{ status: 409 }, { data: { error: 'no_recipients' } }]) {
+      expect(await sendAlertTest(failWith(err))).toEqual({
+        ok: false,
+        message: 'アルコール検知メールの受け取り手がいません',
+      })
+    }
+  })
+  it('503 mail_unavailable', async () => {
+    for (const err of [{ status: 503 }, { data: { error: 'mail_unavailable' } }]) {
+      expect(await sendAlertTest(failWith(err))).toEqual({ ok: false, message: 'メールを送れない状態です' })
+    }
+  })
+  it('それ以外・通信失敗は汎用エラー', async () => {
+    for (const err of [{ status: 500 }, new Error('network'), undefined]) {
+      expect(await sendAlertTest(failWith(err))).toEqual({ ok: false, message: 'テスト送信に失敗しました' })
+    }
+  })
+})
+
+describe('alertTestMessage', () => {
+  it('失敗 0 件なら失敗の部分を出さない', () => {
+    expect(alertTestMessage({ ok: true, sent: 3, failed: 0 })).toBe('3 件送信しました')
+  })
+  it('失敗があれば添える', () => {
+    expect(alertTestMessage({ ok: true, sent: 2, failed: 1 })).toBe('2 件送信しました (失敗 1 件)')
+  })
+  it('失敗はそのまま文言', () => {
+    expect(alertTestMessage({ ok: false, message: 'x' })).toBe('x')
   })
 })
