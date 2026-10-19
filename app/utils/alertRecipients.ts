@@ -13,7 +13,7 @@ export interface NotifyGroup {
 }
 
 export interface GroupMember {
-  recipient_id: string
+  id: string
 }
 
 export type EmailStatus = 'verified' | 'pending' | 'not_registered'
@@ -28,12 +28,12 @@ export function findAlertGroup(groups: NotifyGroup[]): NotifyGroup | null {
   return groups.find((g) => g.name === ALERT_GROUP_NAME) ?? null
 }
 
-/** 警告グループのメンバー (recipient_id の集合)。グループが無ければ空。 */
+/** 警告グループのメンバー (宛先の id の集合。メンバー API の応答は宛先の行そのもので、キーは id)。グループが無ければ空。 */
 export async function loadAlertMembers(apiFetch: ApiFetch): Promise<Set<string>> {
   const group = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'))
   if (!group) return new Set()
   const members = await apiFetch<GroupMember[]>(`/notify/groups/${group.id}/members`)
-  return new Set(members.map((m) => m.recipient_id))
+  return new Set(members.map((m) => m.id))
 }
 
 /**

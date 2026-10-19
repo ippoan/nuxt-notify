@@ -10,7 +10,7 @@ function fakeServer(initial: string[]) {
     const method = options.method ?? 'GET'
     if (method === 'GET' && path === '/notify/groups') return [{ id: 'g1', name: ALERT_GROUP_NAME }]
     if (method === 'GET' && path === '/notify/groups/g1/members') {
-      const snapshot = [...members].map((recipient_id) => ({ recipient_id }))
+      const snapshot = [...members].map((id) => ({ id, name: id }))
       if (!holdMembers) return snapshot
       return new Promise((resolve) => held.push({ path, release: () => resolve(snapshot) }))
     }
@@ -91,7 +91,7 @@ describe('createAlertMemberStore の他の経路', () => {
         if (call === 1) return new Promise((_, rej) => (rejectFirst = rej))
         return [{ id: 'g1', name: ALERT_GROUP_NAME }]
       }
-      return [{ recipient_id: 'a' }, { recipient_id: 'b' }]
+      return [{ id: 'a', name: 'A', email: 'a@example.com' }, { id: 'b', name: 'B', email: 'b@example.com' }]
     }) as unknown as ApiFetch
     const store = createAlertMemberStore(api, (m) => (shown = m), (m) => errors.push(m))
     const first = store.load()
@@ -108,7 +108,7 @@ describe('createAlertMemberStore の他の経路', () => {
     const api = (async (path: string, o: { method?: string } = {}) => {
       if (o.method === 'POST') throw new Error('ng')
       if (path === '/notify/groups') return [{ id: 'g1', name: ALERT_GROUP_NAME }]
-      return [{ recipient_id: 'a' }]
+      return [{ id: 'a', name: 'A' }]
     }) as unknown as ApiFetch
     const store = createAlertMemberStore(api, (m) => (shown = m), (m) => errors.push(m))
     await store.toggle('b', true)
