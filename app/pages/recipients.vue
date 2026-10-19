@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import {
-  addAlertMember,
+  createAlertMemberStore,
   alertCheckDisabledReason,
   canResend,
   emailStatusClass,
   emailStatusLabel,
   emailStatusNote,
-  loadAlertMembers,
   loadEmailStatuses,
-  removeAlertMember,
   resendVerification,
   sendAlertTest,
   alertTestMessage,
@@ -68,14 +66,12 @@ async function loadStatuses() {
   }
 }
 
-async function loadAlertState() {
-  try {
-    alertMembers.value = await loadAlertMembers(alertFetch)
-  } catch (e: any) {
-    alertMembers.value = new Set()
-    alertError.value = 'アルコール検知メールの受け取り手を読み込めませんでした: ' + (e.message || String(e))
-  }
-}
+const alertStore = createAlertMemberStore(
+  alertFetch,
+  (members) => (alertMembers.value = members),
+  (message) => (alertError.value = message),
+)
+const loadAlertState = () => alertStore.load()
 
 async function load() {
   loading.value = true
@@ -93,13 +89,7 @@ async function load() {
 
 async function toggleAlert(r: Recipient, checked: boolean) {
   alertError.value = ''
-  try {
-    if (checked) await addAlertMember(alertFetch, r.id)
-    else await removeAlertMember(alertFetch, r.id)
-  } catch (e: any) {
-    alertError.value = 'アルコール検知メールの設定に失敗しました: ' + (e.message || String(e))
-  }
-  await loadAlertState()
+  await alertStore.toggle(r.id, checked)
 }
 
 async function resend(r: Recipient) {

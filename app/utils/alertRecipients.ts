@@ -178,3 +178,41 @@ export function alertTestMessage(result: AlertTestResult): string {
 export function alertCheckDisabledReason(email: string | null): string {
   return email ? '' : 'メールが未登録のため選べません'
 }
+
+export interface AlertMemberStore {
+  /** 受け取り手を読み直す。 */
+  load(): Promise<void>
+  /** チェックを付ける / 外す。終わったら読み直す。 */
+  toggle(recipientId: string, checked: boolean): Promise<void>
+}
+
+/** 受け取り手の state を持つ。members が変わるたび onMembers、失敗したら onError を呼ぶ。 */
+export function createAlertMemberStore(
+  apiFetch: ApiFetch,
+  onMembers: (members: Set<string>) => void,
+  onError: (message: string) => void,
+): AlertMemberStore {
+  // 読み込みは重なりうる (開いた直後の読み込み中にチェックを触る等)。最後に始めたものだけを反映し、古い結果で上書きしない。
+  let latest = 0
+  async function load() {
+    const mine = ++latest
+    try {
+      const members = await loadAlertMembers(apiFetch)
+      if (mine === latest) onMembers(members)
+    } catch (e: any) {
+      if (mine !== latest) return
+      onMembers(new Set())
+      onError('アルコール検知メールの受け取り手を読み込めませんでした: ' + (e.message || String(e)))
+    }
+  }
+  async function toggle(recipientId: string, checked: boolean) {
+    try {
+      if (checked) await addAlertMember(apiFetch, recipientId)
+      else await removeAlertMember(apiFetch, recipientId)
+    } catch (e: any) {
+      onError('アルコール検知メールの設定に失敗しました: ' + (e.message || String(e)))
+    }
+    await load()
+  }
+  return { load, toggle }
+}
