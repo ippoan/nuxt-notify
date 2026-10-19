@@ -51,9 +51,12 @@ describe('loadAlertMembers', () => {
   it('メンバーを集合にする', async () => {
     const { api } = fakeFetch({
       'GET /notify/groups': [G],
-      'GET /notify/groups/g1/members': [{ recipient_id: 'a' }, { recipient_id: 'b' }],
+      'GET /notify/groups/g1/members': [{ id: 'a', name: 'A', email: 'a@example.com' }, { id: 'b', name: 'B', email: 'b@example.com' }],
     })
-    expect([...(await loadAlertMembers(api))]).toEqual(['a', 'b'])
+    const members = await loadAlertMembers(api)
+    expect(members.size).toBe(2)
+    expect([...members]).toEqual(['a', 'b'])
+    expect(members.has('undefined' as string)).toBe(false)
   })
 })
 
