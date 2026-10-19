@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { distributableRecipients, providerClass, providerLabel, type RecipientProvider } from '~/utils/recipientProvider'
+
 const { apiFetch } = useApi()
 
 interface Recipient {
   id: string
   name: string
-  provider: 'line' | 'lineworks'
+  provider: RecipientProvider
   enabled: boolean
 }
 
@@ -33,7 +35,7 @@ const retentionOptions = [
   { value: 90, label: '90 日 (3 ヶ月)' },
 ]
 
-const enabledRecipients = computed(() => recipients.value.filter(r => r.enabled))
+const enabledRecipients = computed(() => distributableRecipients(recipients.value))
 
 async function load() {
   loading.value = true
@@ -153,9 +155,9 @@ onMounted(load)
                    @click.stop="toggle(r.id)"
                    class="w-4 h-4" />
             <span class="flex-1 text-sm">{{ r.name }}</span>
-            <span :class="r.provider === 'line' ? 'text-green-600' : 'text-blue-600'"
+            <span :class="providerClass(r.provider)"
                   class="text-xs font-medium">
-              {{ r.provider === 'line' ? 'LINE' : 'LINE WORKS' }}
+              {{ providerLabel(r.provider) }}
             </span>
           </li>
         </ul>

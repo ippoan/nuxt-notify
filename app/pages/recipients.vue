@@ -13,6 +13,14 @@ import {
   type EmailStatus,
   type ApiFetch,
 } from '~/utils/alertRecipients'
+import {
+  isRecipientFormValid,
+  providerClass,
+  providerIds,
+  providerLabel,
+  recipientErrorMessage,
+  type RecipientProvider,
+} from '~/utils/recipientProvider'
 
 const { apiFetch } = useApi()
 const alertFetch = apiFetch as ApiFetch
@@ -20,7 +28,7 @@ const alertFetch = apiFetch as ApiFetch
 interface Recipient {
   id: string
   name: string
-  provider: 'line' | 'lineworks'
+  provider: RecipientProvider
   lineworks_user_id: string | null
   line_user_id: string | null
   phone_number: string | null
@@ -36,7 +44,7 @@ const error = ref('')
 const showForm = ref(false)
 const form = reactive({
   name: '',
-  provider: 'line' as 'line' | 'lineworks',
+  provider: 'line' as RecipientProvider,
   line_user_id: '',
   lineworks_user_id: '',
   phone_number: '',
@@ -104,8 +112,7 @@ async function create() {
       body: JSON.stringify({
         name: form.name,
         provider: form.provider,
-        line_user_id: form.provider === 'line' ? form.line_user_id || null : null,
-        lineworks_user_id: form.provider === 'lineworks' ? form.lineworks_user_id || null : null,
+        ...providerIds(form),
         phone_number: form.phone_number || null,
         email: form.email || null,
       }),
@@ -118,7 +125,7 @@ async function create() {
     form.email = ''
     await load()
   } catch (e: any) {
-    alert('作成失敗: ' + (e.message || String(e)))
+    alert('作成失敗: ' + (recipientErrorMessage(e) ?? (e.message || String(e))))
   }
 }
 
@@ -140,7 +147,7 @@ async function toggle(r: Recipient) {
     })
     await load()
   } catch (e: any) {
-    alert('更新失敗: ' + (e.message || String(e)))
+    alert('更新失敗: ' + (recipientErrorMessage(e) ?? (e.message || String(e))))
   }
 }
 
@@ -164,7 +171,7 @@ async function saveName(r: Recipient) {
     editingId.value = null
     await load()
   } catch (e: any) {
-    alert('更新失敗: ' + (e.message || String(e)))
+    alert('更新失敗: ' + (recipientErrorMessage(e) ?? (e.message || String(e))))
   }
 }
 
@@ -197,6 +204,7 @@ onMounted(load)
           <select v-model="form.provider" class="w-full border rounded px-3 py-2 text-sm">
             <option value="line">LINE</option>
             <option value="lineworks">LINE WORKS</option>
+            <option value="email">メール</option>
           </select>
         </div>
         <div v-if="form.provider === 'line'">
@@ -212,11 +220,13 @@ onMounted(load)
           <input v-model="form.phone_number" class="w-full border rounded px-3 py-2 text-sm" placeholder="090-xxxx-xxxx">
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">メール</label>
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            メール<span v-if="form.provider === 'email'" class="text-red-500"> *必須</span>
+          </label>
           <input v-model="form.email" class="w-full border rounded px-3 py-2 text-sm" placeholder="user@example.com">
         </div>
       </div>
-      <button @click="create" :disabled="!form.name"
+      <button @click="create" :disabled="!isRecipientFormValid(form)"
               class="mt-3 bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50">
         登録
       </button>
@@ -257,8 +267,8 @@ onMounted(load)
                   title="クリックで編集">{{ r.name }}</span>
           </td>
           <td class="px-4 py-2">
-            <span :class="r.provider === 'line' ? 'text-green-600' : 'text-blue-600'" class="font-medium">
-              {{ r.provider === 'line' ? 'LINE' : 'LINE WORKS' }}
+            <span :class="providerClass(r.provider)" class="font-medium">
+              {{ providerLabel(r.provider) }}
             </span>
           </td>
           <td class="px-4 py-2 font-mono text-xs text-gray-500">

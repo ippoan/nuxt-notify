@@ -20,3 +20,7 @@ branches = true
 [[files]]
 path = "app/utils/alertRecipients.ts"
 branches = true
+
+[[files]]
+path = "app/utils/recipientProvider.ts"
+branches = true
