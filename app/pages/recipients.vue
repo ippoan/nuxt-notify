@@ -10,6 +10,8 @@ import {
   loadEmailStatuses,
   removeAlertMember,
   resendVerification,
+  sendAlertTest,
+  alertTestMessage,
   type EmailStatus,
   type ApiFetch,
 } from '~/utils/alertRecipients'
@@ -103,6 +105,22 @@ async function toggleAlert(r: Recipient, checked: boolean) {
 async function resend(r: Recipient) {
   resendResults.value = { ...resendResults.value, [r.id]: await resendVerification(alertFetch, r.id) }
   await loadStatuses()
+}
+
+// アルコール検知メールのテスト送信 (チェック済みの人全員へ)
+const alertTesting = ref(false)
+const alertTestResult = ref<{ ok: boolean; message: string } | null>(null)
+
+async function sendTest() {
+  if (!confirm(`アルコール検知メールのテストを ${alertMembers.value.size} 人に送ります。よろしいですか？`)) return
+  alertTesting.value = true
+  alertTestResult.value = null
+  try {
+    const res = await sendAlertTest(alertFetch)
+    alertTestResult.value = { ok: res.ok, message: alertTestMessage(res) }
+  } finally {
+    alertTesting.value = false
+  }
 }
 
 async function create() {
@@ -233,6 +251,17 @@ onMounted(load)
     </div>
 
     <div v-if="alertError" class="text-red-500 text-sm mb-2">{{ alertError }}</div>
+
+    <div class="flex items-center gap-3 mb-2">
+      <button @click="sendTest" :disabled="alertMembers.size === 0 || alertTesting"
+              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+        {{ alertTesting ? '送信中...' : 'アルコール検知メールのテスト送信' }}
+      </button>
+      <span v-if="alertTestResult" class="text-sm"
+            :class="alertTestResult.ok ? 'text-green-600' : 'text-red-500'">
+        {{ alertTestResult.message }}
+      </span>
+    </div>
 
     <!-- 一覧 -->
     <div v-if="loading" class="text-gray-500">読み込み中...</div>

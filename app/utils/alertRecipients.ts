@@ -145,6 +145,35 @@ export async function resendVerification(apiFetch: ApiFetch, recipientId: string
   }
 }
 
+export type AlertTestResult = { ok: true; sent: number; failed: number } | { ok: false; message: string }
+
+const ALERT_TEST_GENERIC_ERROR = 'テスト送信に失敗しました'
+
+/** アルコール検知メールのテストを受け取り手全員に送る。投げない。 */
+export async function sendAlertTest(apiFetch: ApiFetch): Promise<AlertTestResult> {
+  try {
+    const res = await apiFetch<{ sent?: number; failed?: number }>('/measurements/alert-test', { method: 'POST' })
+    if (typeof res?.sent !== 'number') return { ok: false, message: ALERT_TEST_GENERIC_ERROR }
+    return { ok: true, sent: res.sent, failed: res.failed ?? 0 }
+  } catch (e: any) {
+    const code = e?.data?.error ?? e?.response?._data?.error
+    if (e?.status === 403 || code === 'forbidden') return { ok: false, message: '管理者だけが送れます' }
+    if (e?.status === 409 || code === 'no_recipients') {
+      return { ok: false, message: 'アルコール検知メールの受け取り手がいません' }
+    }
+    if (e?.status === 503 || code === 'mail_unavailable') return { ok: false, message: 'メールを送れない状態です' }
+    return { ok: false, message: ALERT_TEST_GENERIC_ERROR }
+  }
+}
+
+/** テスト送信の結果を 1 行の文言にする。 */
+export function alertTestMessage(result: AlertTestResult): string {
+  if (!result.ok) return result.message
+  return result.failed > 0
+    ? `${result.sent} 件送信しました (失敗 ${result.failed} 件)`
+    : `${result.sent} 件送信しました`
+}
+
 /** メールの無い宛先はチェックできない。理由 (title) を返す。チェックできるなら空。 */
 export function alertCheckDisabledReason(email: string | null): string {
   return email ? '' : 'メールが未登録のため選べません'
