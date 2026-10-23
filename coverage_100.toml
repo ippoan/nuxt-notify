@@ -24,7 +24,3 @@ branches = true
 [[files]]
 path = "app/utils/recipientProvider.ts"
 branches = true
-
-[[files]]
-path = "app/utils/employeeLink.ts"
-branches = true

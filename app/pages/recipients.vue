@@ -10,22 +10,9 @@ import {
   resendVerification,
   sendAlertTest,
   alertTestMessage,
-  BP_REPORT_GROUP_NAME,
   type EmailStatus,
   type ApiFetch,
 } from '~/utils/alertRecipients'
-import {
-  employeeLabel,
-  linkEmployeesByName,
-  linkedEmployeeText,
-  linkResultMessage,
-  loadEmployees,
-  setRecipientEmployee,
-  skipReasonLabel,
-  takenEmployeeIds,
-  type Employee,
-  type LinkPlan,
-} from '~/utils/employeeLink'
 import {
   isRecipientFormValid,
   providerClass,
@@ -47,7 +34,6 @@ interface Recipient {
   phone_number: string | null
   email: string | null
   enabled: boolean
-  employee_id: string | null
 }
 
 const recipients = ref<Recipient[]>([])
@@ -80,78 +66,6 @@ async function loadStatuses() {
   }
 }
 
-// 血圧の日報メール (毎朝 7:00) の受け取り手。仕組みはアルコール検知と同じで、グループ名だけが違う
-const bpMembers = ref<Set<string>>(new Set())
-const bpError = ref('')
-const bpStore = createAlertMemberStore(
-  alertFetch,
-  (members) => (bpMembers.value = members),
-  (message) => (bpError.value = message),
-  { groupName: BP_REPORT_GROUP_NAME, label: '血圧の日報' },
-)
-
-// 宛先と社員マスタの結び付け (血圧の結果を測った本人へ LINE WORKS で送るため)
-const employees = ref<Employee[]>([])
-const employeeById = computed(() => new Map(employees.value.map((e) => [e.id, e])))
-const employeeError = ref('')
-const linkMessage = ref<{ ok: boolean; message: string } | null>(null)
-
-// 社員の一覧の取得失敗は一覧を潰さない (管理者でなければ 403)。
-async function loadEmployeeList() {
-  employeeError.value = ''
-  try {
-    employees.value = await loadEmployees(alertFetch)
-  } catch {
-    employees.value = []
-    employeeError.value = '社員の一覧を読み込めませんでした (管理者だけが結び付けできます)'
-  }
-}
-
-function employeeOptionDisabled(r: Recipient, e: Employee): boolean {
-  return takenEmployeeIds(recipients.value, r.id).has(e.id)
-}
-
-async function changeEmployee(r: Recipient, value: string) {
-  linkMessage.value = null
-  const res = await setRecipientEmployee(alertFetch, r.id, value || null)
-  if (!res.ok) linkMessage.value = { ok: false, message: res.message }
-  await load()
-}
-
-// 氏名で社員と結び付ける: 候補 (dry_run) を見せて、確認してから確定する
-const linkPlan = ref<LinkPlan | null>(null)
-const linkBusy = ref(false)
-
-async function previewLink() {
-  linkMessage.value = null
-  linkBusy.value = true
-  try {
-    const res = await linkEmployeesByName(alertFetch, true)
-    if (res.ok) linkPlan.value = res.value
-    else linkMessage.value = { ok: false, message: res.message }
-  } finally {
-    linkBusy.value = false
-  }
-}
-
-async function commitLink() {
-  linkBusy.value = true
-  try {
-    const res = await linkEmployeesByName(alertFetch, false)
-    linkMessage.value = res.ok
-      ? { ok: true, message: linkResultMessage(res.value) }
-      : { ok: false, message: res.message }
-    linkPlan.value = null
-  } finally {
-    linkBusy.value = false
-  }
-  await load()
-}
-
-function cancelLink() {
-  linkPlan.value = null
-}
-
 const alertStore = createAlertMemberStore(
   alertFetch,
   (members) => (alertMembers.value = members),
@@ -170,18 +84,12 @@ async function load() {
     loading.value = false
   }
   alertError.value = ''
-  bpError.value = ''
-  await Promise.all([loadAlertState(), bpStore.load(), loadStatuses(), loadEmployeeList()])
+  await Promise.all([loadAlertState(), loadStatuses()])
 }
 
 async function toggleAlert(r: Recipient, checked: boolean) {
   alertError.value = ''
   await alertStore.toggle(r.id, checked)
-}
-
-async function toggleBp(r: Recipient, checked: boolean) {
-  bpError.value = ''
-  await bpStore.toggle(r.id, checked)
 }
 
 async function resend(r: Recipient) {
@@ -333,8 +241,6 @@ onMounted(load)
     </div>
 
     <div v-if="alertError" class="text-red-500 text-sm mb-2">{{ alertError }}</div>
-    <div v-if="bpError" class="text-red-500 text-sm mb-2">{{ bpError }}</div>
-    <div v-if="employeeError" class="text-amber-600 text-sm mb-2">{{ employeeError }}</div>
 
     <div class="flex items-center gap-3 mb-2">
       <button @click="sendTest" :disabled="alertMembers.size === 0 || alertTesting"
@@ -345,46 +251,6 @@ onMounted(load)
             :class="alertTestResult.ok ? 'text-green-600' : 'text-red-500'">
         {{ alertTestResult.message }}
       </span>
-    </div>
-
-    <!-- 氏名での社員との結び付け -->
-    <div class="flex items-center gap-3 mb-2">
-      <button @click="previewLink" :disabled="linkBusy || employees.length === 0"
-              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
-        {{ linkBusy && !linkPlan ? '確認中...' : '氏名で社員と結び付ける' }}
-      </button>
-      <span v-if="linkMessage" class="text-sm" :class="linkMessage.ok ? 'text-green-600' : 'text-red-500'">
-        {{ linkMessage.message }}
-      </span>
-    </div>
-
-    <div v-if="linkPlan" class="bg-white rounded-lg shadow p-4 mb-4 border text-sm">
-      <p class="mb-2 text-gray-600">
-        宛先と社員の名前を、空白 (半角・全角) を除いて比べます。同じ名前の社員がちょうど 1 人で、宛先も社員もまだ結び付いていないものだけを結びます。
-      </p>
-      <h3 class="font-bold mb-1">結び付ける ({{ linkPlan.candidates.length }} 件)</h3>
-      <ul v-if="linkPlan.candidates.length" class="mb-3">
-        <li v-for="c in linkPlan.candidates" :key="c.recipient_id">
-          {{ c.recipient_name }} ↔ {{ employeeLabel({ name: c.employee_name, code: c.employee_code }) }}
-        </li>
-      </ul>
-      <p v-else class="mb-3 text-gray-400">結び付けられる宛先はありません</p>
-      <h3 v-if="linkPlan.skipped.length" class="font-bold mb-1">結べない宛先 ({{ linkPlan.skipped.length }} 件)</h3>
-      <ul v-if="linkPlan.skipped.length" class="mb-3 text-gray-500">
-        <li v-for="s in linkPlan.skipped" :key="s.recipient_id">
-          {{ s.recipient_name }}: {{ skipReasonLabel(s.reason) }}
-        </li>
-      </ul>
-      <div class="flex gap-2">
-        <button v-if="linkPlan.candidates.length" @click="commitLink" :disabled="linkBusy"
-                class="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 disabled:opacity-50">
-          {{ linkBusy ? '結び付け中...' : `${linkPlan.candidates.length} 件を結び付ける` }}
-        </button>
-        <button @click="cancelLink" :disabled="linkBusy"
-                class="px-4 py-2 rounded text-sm border hover:bg-gray-50 disabled:opacity-50">
-          キャンセル
-        </button>
-      </div>
     </div>
 
     <!-- 一覧 -->
@@ -400,9 +266,7 @@ onMounted(load)
           <th class="px-4 py-2 text-left">ID</th>
           <th class="px-4 py-2 text-left">電話番号</th>
           <th class="px-4 py-2 text-left">メール</th>
-          <th class="px-4 py-2 text-left">社員</th>
           <th class="px-4 py-2 text-center">アルコール検知メール</th>
-          <th class="px-4 py-2 text-center">血圧の日報</th>
           <th class="px-4 py-2 text-center">有効</th>
           <th class="px-4 py-2 text-center">操作</th>
         </tr>
@@ -448,28 +312,10 @@ onMounted(load)
               </div>
             </template>
           </td>
-          <td class="px-4 py-2">
-            <select :value="r.employee_id ?? ''" :disabled="employees.length === 0 && !r.employee_id"
-                    @change="changeEmployee(r, ($event.target as HTMLSelectElement).value)"
-                    class="border rounded px-2 py-1 text-sm max-w-48">
-              <option value="">(未設定)</option>
-              <option v-if="r.employee_id && !employeeById.has(r.employee_id)" :value="r.employee_id">
-                {{ linkedEmployeeText(r.employee_id, employeeById) }}
-              </option>
-              <option v-for="e in employees" :key="e.id" :value="e.id" :disabled="employeeOptionDisabled(r, e)">
-                {{ employeeLabel(e) }}
-              </option>
-            </select>
-          </td>
           <td class="px-4 py-2 text-center">
             <input type="checkbox" :checked="alertMembers.has(r.id)" :disabled="!r.email"
                    :title="alertCheckDisabledReason(r.email)"
                    @change="toggleAlert(r, ($event.target as HTMLInputElement).checked)" />
-          </td>
-          <td class="px-4 py-2 text-center">
-            <input type="checkbox" :checked="bpMembers.has(r.id)" :disabled="!r.email"
-                   :title="alertCheckDisabledReason(r.email)"
-                   @change="toggleBp(r, ($event.target as HTMLInputElement).checked)" />
           </td>
           <td class="px-4 py-2 text-center">
             <button @click="toggle(r)" :class="r.enabled ? 'bg-green-500' : 'bg-gray-300'"
