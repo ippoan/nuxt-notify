@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { bpReportChecked, bpReportDisabledReason } from '~/utils/bpReport'
 import {
   createAlertMemberStore,
   alertCheckDisabledReason,
@@ -10,7 +11,7 @@ import {
   resendVerification,
   sendAlertTest,
   alertTestMessage,
-  BP_REPORT_GROUP_NAME,
+  BP_REPORT_OPT_OUT_GROUP_NAME,
   type EmailStatus,
   type ApiFetch,
 } from '~/utils/alertRecipients'
@@ -80,14 +81,15 @@ async function loadStatuses() {
   }
 }
 
-// 血圧の日報メール (毎朝 7:00) の受け取り手。仕組みはアルコール検知と同じで、グループ名だけが違う
-const bpMembers = ref<Set<string>>(new Set())
+// 血圧の日報メール (毎朝 7:00) はオプトアウト: 受け取れる人 (管理者) は既定でチェックあり、
+// チェックを外すと「受け取らない」グループに入れる (グループは画面に出さない)。bpOptOut はそのグループのメンバー
+const bpOptOut = ref<Set<string>>(new Set())
 const bpError = ref('')
 const bpStore = createAlertMemberStore(
   alertFetch,
-  (members) => (bpMembers.value = members),
+  (members) => (bpOptOut.value = members),
   (message) => (bpError.value = message),
-  { groupName: BP_REPORT_GROUP_NAME, label: '血圧の日報' },
+  { groupName: BP_REPORT_OPT_OUT_GROUP_NAME, label: '血圧の日報' },
 )
 
 // 宛先と社員マスタの結び付け (血圧の結果を測った本人へ LINE WORKS で送るため)
@@ -181,7 +183,8 @@ async function toggleAlert(r: Recipient, checked: boolean) {
 
 async function toggleBp(r: Recipient, checked: boolean) {
   bpError.value = ''
-  await bpStore.toggle(r.id, checked)
+  // チェックあり = グループに入っていない。外したらグループに入れ、付けたらグループから外す
+  await bpStore.toggle(r.id, !checked)
 }
 
 async function resend(r: Recipient) {
@@ -467,8 +470,9 @@ onMounted(load)
                    @change="toggleAlert(r, ($event.target as HTMLInputElement).checked)" />
           </td>
           <td class="px-4 py-2 text-center">
-            <input type="checkbox" :checked="bpMembers.has(r.id)" :disabled="!r.email"
-                   :title="alertCheckDisabledReason(r.email)"
+            <input type="checkbox" :checked="bpReportChecked(r, bpOptOut, employeeById)"
+                   :disabled="bpReportDisabledReason(r, employeeById) !== ''"
+                   :title="bpReportDisabledReason(r, employeeById)"
                    @change="toggleBp(r, ($event.target as HTMLInputElement).checked)" />
           </td>
           <td class="px-4 py-2 text-center">
