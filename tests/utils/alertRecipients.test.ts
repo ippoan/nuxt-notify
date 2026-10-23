@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   ALERT_GROUP_NAME,
-  BP_REPORT_OPT_OUT_GROUP_NAME,
+  BP_REPORT_GROUP_NAME,
   findAlertGroup,
   loadAlertMembers,
   ensureAlertGroup,
@@ -296,14 +296,14 @@ describe('alertTestMessage', () => {
   })
 })
 
-describe('血圧の日報の「受け取らない」グループ (グループ名を渡す)', () => {
-  const BP = { id: 'g2', name: BP_REPORT_OPT_OUT_GROUP_NAME }
-  it('グループ名は送る側と同じ「血圧の日報を受け取らない」', () => {
-    expect(BP_REPORT_OPT_OUT_GROUP_NAME).toBe('血圧の日報を受け取らない')
+describe('血圧の日報のグループ (グループ名を渡す)', () => {
+  const BP = { id: 'g2', name: BP_REPORT_GROUP_NAME }
+  it('グループ名は送る側と同じ「血圧の日報」', () => {
+    expect(BP_REPORT_GROUP_NAME).toBe('血圧の日報')
   })
   it('名前で探す (アルコール検知と取り違えない)', () => {
-    expect(findAlertGroup([G, BP], BP_REPORT_OPT_OUT_GROUP_NAME)).toEqual(BP)
-    expect(findAlertGroup([G], BP_REPORT_OPT_OUT_GROUP_NAME)).toBeNull()
+    expect(findAlertGroup([G, BP], BP_REPORT_GROUP_NAME)).toEqual(BP)
+    expect(findAlertGroup([G], BP_REPORT_GROUP_NAME)).toBeNull()
     expect(findAlertGroup([G, BP])).toEqual(G)
   })
   it('メンバーはそのグループのもの', async () => {
@@ -311,7 +311,7 @@ describe('血圧の日報の「受け取らない」グループ (グループ�
       'GET /notify/groups': [G, BP],
       'GET /notify/groups/g2/members': [{ id: 'z' }],
     })
-    expect([...(await loadAlertMembers(api, BP_REPORT_OPT_OUT_GROUP_NAME))]).toEqual(['z'])
+    expect([...(await loadAlertMembers(api, BP_REPORT_GROUP_NAME))]).toEqual(['z'])
   })
   it('無ければその名前で作り、メンバーを足す', async () => {
     let created = false
@@ -323,22 +323,22 @@ describe('血圧の日報の「受け取らない」グループ (グループ�
       },
       'POST /notify/groups/g2/members': {},
     })
-    await addAlertMember(api, 'r1', BP_REPORT_OPT_OUT_GROUP_NAME)
+    await addAlertMember(api, 'r1', BP_REPORT_GROUP_NAME)
     expect(calls.find((c) => c.path === '/notify/groups' && c.method === 'POST')?.body).toBe(
-      JSON.stringify({ name: '血圧の日報を受け取らない' }),
+      JSON.stringify({ name: '血圧の日報' }),
     )
     expect(calls.at(-1)).toMatchObject({ path: '/notify/groups/g2/members', method: 'POST' })
   })
   it('引き直しても無ければ失敗', async () => {
     const { api } = fakeFetch({ 'GET /notify/groups': [G], 'POST /notify/groups': {} })
-    await expect(ensureAlertGroup(api, BP_REPORT_OPT_OUT_GROUP_NAME)).rejects.toThrow()
+    await expect(ensureAlertGroup(api, BP_REPORT_GROUP_NAME)).rejects.toThrow()
   })
   it('外す', async () => {
     const { api, calls } = fakeFetch({
       'GET /notify/groups': [G, BP],
       'DELETE /notify/groups/g2/members/r1': {},
     })
-    await removeAlertMember(api, 'r1', BP_REPORT_OPT_OUT_GROUP_NAME)
+    await removeAlertMember(api, 'r1', BP_REPORT_GROUP_NAME)
     expect(calls.at(-1)?.path).toBe('/notify/groups/g2/members/r1')
   })
 })

@@ -1,15 +1,13 @@
 // アルコール検知メールの受け取り手を宛先画面 (recipients.vue) で扱うためのロジック。
 // グループ (notify の recipient group) は画面に出さず、最初にチェックを付けたときに自動で作る。
-// 血圧の日報メールは逆向き (オプトアウト): 管理者は既定で受け取り、このグループ (BP_REPORT_OPT_OUT_GROUP_NAME) に入れた人だけが外れる。
-// グループの作り方・メンバーの読み書きは同じ仕組みで、「チェックあり = グループに入っていない」とする判定は bpReport.ts。
+// 血圧の日報メールの受け取り手 (BP_REPORT_GROUP_NAME) も同じ仕組みで、グループ名と文言だけが違う。
 
 // ippoan/alc-measurements-worker の crates/measurements/src/alert.rs:36 `ALERT_GROUP` と同じ文字列。
 // 一字違うと誰にも届かない。
 export const ALERT_GROUP_NAME = 'アルコール検知'
 
-// ippoan/alc-measurements-worker の血圧の日報 (毎朝 7:00 のメール) の「受け取らない」グループ名 (report.rs の `OPT_OUT_GROUP`)。
-// 送る側と一字でも違うと、外したはずの人に届く。旧グループ「血圧の日報」は使わない。
-export const BP_REPORT_OPT_OUT_GROUP_NAME = '血圧の日報を受け取らない'
+// ippoan/alc-measurements-worker の血圧の日報 (毎朝 7:00 のメール) の宛先グループ名。送る側と一字でも違うと誰にも届かない。
+export const BP_REPORT_GROUP_NAME = '血圧の日報'
 
 export type ApiFetch = <T>(path: string, options?: { method?: string; body?: string }) => Promise<T>
 

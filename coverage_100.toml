@@ -28,7 +28,3 @@ branches = true
 [[files]]
 path = "app/utils/employeeLink.ts"
 branches = true
-
-[[files]]
-path = "app/utils/bpReport.ts"
-branches = true

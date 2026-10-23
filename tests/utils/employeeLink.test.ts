@@ -20,8 +20,8 @@ const api = (impl: (path: string, options?: { method?: string; body?: string }) 
 const reject = (error: unknown) => api(() => Promise.reject(error))
 
 describe('employeeLabel / linkedEmployeeText', () => {
-  const a: Employee = { id: 'e1', name: '山田 太郎', code: '12', role: ['driver'] }
-  const b: Employee = { id: 'e2', name: '佐藤 花子', code: null, role: ['admin'] }
+  const a: Employee = { id: 'e1', name: '山田 太郎', code: '12' }
+  const b: Employee = { id: 'e2', name: '佐藤 花子', code: null }
   it('社員コードがあれば添える', () => {
     expect(employeeLabel(a)).toBe('山田 太郎 (12)')
     expect(employeeLabel(b)).toBe('佐藤 花子')
@@ -67,8 +67,8 @@ describe('linkErrorMessage', () => {
 
 describe('loadEmployees', () => {
   it('社員の一覧を読む', async () => {
-    const f = api(() => [{ id: 'e1', name: '甲', code: null, role: ['manager'] }])
-    expect(await loadEmployees(f)).toEqual([{ id: 'e1', name: '甲', code: null, role: ['manager'] }])
+    const f = api(() => [{ id: 'e1', name: '甲', code: null }])
+    expect(await loadEmployees(f)).toEqual([{ id: 'e1', name: '甲', code: null }])
     expect(f).toHaveBeenCalledWith('/notify/employees')
   })
 })

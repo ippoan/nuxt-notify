@@ -9,8 +9,6 @@ export interface Employee {
   name: string
   /** 社員コード。無い人は null。 */
   code: string | null
-  /** 役割 (`driver` / `manager` / `admin`)。血圧の日報を受け取れるのは manager・admin。 */
-  role: string[]
 }
 
 /** 氏名での自動結合の候補 (宛先 ↔ 社員)。 */
