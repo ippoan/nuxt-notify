@@ -1,15 +1,9 @@
 // アルコール検知メールの受け取り手を宛先画面 (recipients.vue) で扱うためのロジック。
 // グループ (notify の recipient group) は画面に出さず、最初にチェックを付けたときに自動で作る。
-// 血圧の日報メールは逆向き (オプトアウト): 管理者は既定で受け取り、このグループ (BP_REPORT_OPT_OUT_GROUP_NAME) に入れた人だけが外れる。
-// グループの作り方・メンバーの読み書きは同じ仕組みで、「チェックあり = グループに入っていない」とする判定は bpReport.ts。
 
 // ippoan/alc-measurements-worker の crates/measurements/src/alert.rs:36 `ALERT_GROUP` と同じ文字列。
 // 一字違うと誰にも届かない。
 export const ALERT_GROUP_NAME = 'アルコール検知'
-
-// ippoan/alc-measurements-worker の血圧の日報 (毎朝 7:00 のメール) の「受け取らない」グループ名 (report.rs の `OPT_OUT_GROUP`)。
-// 送る側と一字でも違うと、外したはずの人に届く。旧グループ「血圧の日報」は使わない。
-export const BP_REPORT_OPT_OUT_GROUP_NAME = '血圧の日報を受け取らない'
 
 export type ApiFetch = <T>(path: string, options?: { method?: string; body?: string }) => Promise<T>
 
@@ -30,13 +24,13 @@ export interface EmailStatusResponse {
 }
 
 /** groups から警告グループを名前で探す。 */
-export function findAlertGroup(groups: NotifyGroup[], groupName: string = ALERT_GROUP_NAME): NotifyGroup | null {
-  return groups.find((g) => g.name === groupName) ?? null
+export function findAlertGroup(groups: NotifyGroup[]): NotifyGroup | null {
+  return groups.find((g) => g.name === ALERT_GROUP_NAME) ?? null
 }
 
 /** 警告グループのメンバー (宛先の id の集合。メンバー API の応答は宛先の行そのもので、キーは id)。グループが無ければ空。 */
-export async function loadAlertMembers(apiFetch: ApiFetch, groupName: string = ALERT_GROUP_NAME): Promise<Set<string>> {
-  const group = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'), groupName)
+export async function loadAlertMembers(apiFetch: ApiFetch): Promise<Set<string>> {
+  const group = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'))
   if (!group) return new Set()
   const members = await apiFetch<GroupMember[]>(`/notify/groups/${group.id}/members`)
   return new Set(members.map((m) => m.id))
@@ -46,30 +40,26 @@ export async function loadAlertMembers(apiFetch: ApiFetch, groupName: string = A
  * 警告グループの id を返す。無ければ作る。
  * 作成が (一意制約違反などで) どんな失敗をしても、引き直して名前で探す。それでも無ければ失敗を投げる。
  */
-export async function ensureAlertGroup(apiFetch: ApiFetch, groupName: string = ALERT_GROUP_NAME): Promise<string> {
-  const existing = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'), groupName)
+export async function ensureAlertGroup(apiFetch: ApiFetch): Promise<string> {
+  const existing = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'))
   if (existing) return existing.id
   try {
     const created = await apiFetch<NotifyGroup>('/notify/groups', {
       method: 'POST',
-      body: JSON.stringify({ name: groupName }),
+      body: JSON.stringify({ name: ALERT_GROUP_NAME }),
     })
     if (created?.id) return created.id
   } catch {
     // 同時作成などで失敗しても、下で引き直して確かめる
   }
-  const refetched = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'), groupName)
+  const refetched = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'))
   if (!refetched) throw new Error('通知グループを作れませんでした。もう一度お試しください')
   return refetched.id
 }
 
 /** チェックを付ける (グループが無ければ作る)。 */
-export async function addAlertMember(
-  apiFetch: ApiFetch,
-  recipientId: string,
-  groupName: string = ALERT_GROUP_NAME,
-): Promise<void> {
-  const groupId = await ensureAlertGroup(apiFetch, groupName)
+export async function addAlertMember(apiFetch: ApiFetch, recipientId: string): Promise<void> {
+  const groupId = await ensureAlertGroup(apiFetch)
   await apiFetch(`/notify/groups/${groupId}/members`, {
     method: 'POST',
     body: JSON.stringify({ recipient_ids: [recipientId] }),
@@ -77,12 +67,8 @@ export async function addAlertMember(
 }
 
 /** チェックを外す。グループが無ければ外すものも無い。 */
-export async function removeAlertMember(
-  apiFetch: ApiFetch,
-  recipientId: string,
-  groupName: string = ALERT_GROUP_NAME,
-): Promise<void> {
-  const group = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'), groupName)
+export async function removeAlertMember(apiFetch: ApiFetch, recipientId: string): Promise<void> {
+  const group = findAlertGroup(await apiFetch<NotifyGroup[]>('/notify/groups'))
   if (!group) return
   await apiFetch(`/notify/groups/${group.id}/members/${recipientId}`, { method: 'DELETE' })
 }
@@ -200,41 +186,31 @@ export interface AlertMemberStore {
   toggle(recipientId: string, checked: boolean): Promise<void>
 }
 
-export interface AlertMemberStoreOptions {
-  /** 受け取り手のグループ名 (既定はアルコール検知)。 */
-  groupName?: string
-  /** エラー文に出す呼び名 (既定はアルコール検知メール)。 */
-  label?: string
-}
-
 /** 受け取り手の state を持つ。members が変わるたび onMembers、失敗したら onError を呼ぶ。 */
 export function createAlertMemberStore(
   apiFetch: ApiFetch,
   onMembers: (members: Set<string>) => void,
   onError: (message: string) => void,
-  options: AlertMemberStoreOptions = {},
 ): AlertMemberStore {
-  const groupName = options.groupName ?? ALERT_GROUP_NAME
-  const label = options.label ?? 'アルコール検知メール'
   // 読み込みは重なりうる (開いた直後の読み込み中にチェックを触る等)。最後に始めたものだけを反映し、古い結果で上書きしない。
   let latest = 0
   async function load() {
     const mine = ++latest
     try {
-      const members = await loadAlertMembers(apiFetch, groupName)
+      const members = await loadAlertMembers(apiFetch)
       if (mine === latest) onMembers(members)
     } catch (e: any) {
       if (mine !== latest) return
       onMembers(new Set())
-      onError(`${label}の受け取り手を読み込めませんでした: ` + (e.message || String(e)))
+      onError('アルコール検知メールの受け取り手を読み込めませんでした: ' + (e.message || String(e)))
     }
   }
   async function toggle(recipientId: string, checked: boolean) {
     try {
-      if (checked) await addAlertMember(apiFetch, recipientId, groupName)
-      else await removeAlertMember(apiFetch, recipientId, groupName)
+      if (checked) await addAlertMember(apiFetch, recipientId)
+      else await removeAlertMember(apiFetch, recipientId)
     } catch (e: any) {
-      onError(`${label}の設定に失敗しました: ` + (e.message || String(e)))
+      onError('アルコール検知メールの設定に失敗しました: ' + (e.message || String(e)))
     }
     await load()
   }
