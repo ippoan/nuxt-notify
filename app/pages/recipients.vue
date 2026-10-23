@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  BP_REPORT_GROUP_NAME,
   createAlertMemberStore,
   alertCheckDisabledReason,
   canResend,
@@ -9,6 +10,7 @@ import {
   loadEmailStatuses,
   resendVerification,
   sendAlertTest,
+  sendBpReportTest,
   alertTestMessage,
   type EmailStatus,
   type ApiFetch,
@@ -71,6 +73,15 @@ const alertStore = createAlertMemberStore(
   (members) => (alertMembers.value = members),
   (message) => (alertError.value = message),
 )
+// 血圧の日報メール (毎朝 7:00) の受け取り手。仕組みはアルコール検知と同じで、グループ名だけが違う
+const bpMembers = ref<Set<string>>(new Set())
+const bpError = ref('')
+const bpStore = createAlertMemberStore(
+  alertFetch,
+  (members) => (bpMembers.value = members),
+  (message) => (bpError.value = message),
+  { groupName: BP_REPORT_GROUP_NAME, label: '血圧の日報' },
+)
 const loadAlertState = () => alertStore.load()
 
 async function load() {
@@ -84,12 +95,18 @@ async function load() {
     loading.value = false
   }
   alertError.value = ''
-  await Promise.all([loadAlertState(), loadStatuses()])
+  bpError.value = ''
+  await Promise.all([loadAlertState(), bpStore.load(), loadStatuses()])
 }
 
 async function toggleAlert(r: Recipient, checked: boolean) {
   alertError.value = ''
   await alertStore.toggle(r.id, checked)
+}
+
+async function toggleBp(r: Recipient, checked: boolean) {
+  bpError.value = ''
+  await bpStore.toggle(r.id, checked)
 }
 
 async function resend(r: Recipient) {
@@ -110,6 +127,22 @@ async function sendTest() {
     alertTestResult.value = { ok: res.ok, message: alertTestMessage(res) }
   } finally {
     alertTesting.value = false
+  }
+}
+
+// 血圧の日報メールのテスト送信 (チェック済みの人全員へ)
+const bpTesting = ref(false)
+const bpTestResult = ref<{ ok: boolean; message: string } | null>(null)
+
+async function sendBpTest() {
+  if (!confirm(`血圧の日報メールのテストを ${bpMembers.value.size} 人に送ります。よろしいですか？`)) return
+  bpTesting.value = true
+  bpTestResult.value = null
+  try {
+    const res = await sendBpReportTest(alertFetch)
+    bpTestResult.value = { ok: res.ok, message: alertTestMessage(res) }
+  } finally {
+    bpTesting.value = false
   }
 }
 
@@ -241,6 +274,7 @@ onMounted(load)
     </div>
 
     <div v-if="alertError" class="text-red-500 text-sm mb-2">{{ alertError }}</div>
+    <div v-if="bpError" class="text-red-500 text-sm mb-2">{{ bpError }}</div>
 
     <div class="flex items-center gap-3 mb-2">
       <button @click="sendTest" :disabled="alertMembers.size === 0 || alertTesting"
@@ -250,6 +284,17 @@ onMounted(load)
       <span v-if="alertTestResult" class="text-sm"
             :class="alertTestResult.ok ? 'text-green-600' : 'text-red-500'">
         {{ alertTestResult.message }}
+      </span>
+    </div>
+
+    <div class="flex items-center gap-3 mb-2">
+      <button @click="sendBpTest" :disabled="bpMembers.size === 0 || bpTesting"
+              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+        {{ bpTesting ? '送信中...' : '血圧の日報のテスト送信' }}
+      </button>
+      <span v-if="bpTestResult" class="text-sm"
+            :class="bpTestResult.ok ? 'text-green-600' : 'text-red-500'">
+        {{ bpTestResult.message }}
       </span>
     </div>
 
@@ -267,6 +312,7 @@ onMounted(load)
           <th class="px-4 py-2 text-left">電話番号</th>
           <th class="px-4 py-2 text-left">メール</th>
           <th class="px-4 py-2 text-center">アルコール検知メール</th>
+          <th class="px-4 py-2 text-center">血圧の日報</th>
           <th class="px-4 py-2 text-center">有効</th>
           <th class="px-4 py-2 text-center">操作</th>
         </tr>
@@ -316,6 +362,11 @@ onMounted(load)
             <input type="checkbox" :checked="alertMembers.has(r.id)" :disabled="!r.email"
                    :title="alertCheckDisabledReason(r.email)"
                    @change="toggleAlert(r, ($event.target as HTMLInputElement).checked)" />
+          </td>
+          <td class="px-4 py-2 text-center">
+            <input type="checkbox" :checked="bpMembers.has(r.id)" :disabled="!r.email"
+                   :title="alertCheckDisabledReason(r.email)"
+                   @change="toggleBp(r, ($event.target as HTMLInputElement).checked)" />
           </td>
           <td class="px-4 py-2 text-center">
             <button @click="toggle(r)" :class="r.enabled ? 'bg-green-500' : 'bg-gray-300'"
