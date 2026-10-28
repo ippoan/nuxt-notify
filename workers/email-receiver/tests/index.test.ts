@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import worker, { extractTenantShortId, pickRoute, uint8ArrayToBase64 } from "../src/index";
+import worker, { extractTenantShortId, INGEST_URL, pickRoute, uint8ArrayToBase64 } from "../src/index";
 
 function makeMessage(overrides: Partial<{
   to: string;
@@ -35,17 +35,19 @@ function makeMessage(overrides: Partial<{
   } as unknown as ForwardableEmailMessage & { setReject: typeof setReject };
 }
 
-function makeEnv(overrides: {
-  prodEndpoint?: string;
-  prodSecret?: string;
-  stagingEndpoint?: string;
-  stagingSecret?: string;
-} = {}) {
+/** Service Binding (Fetcher) の代わり。`fetch` の呼び出しを残す */
+function makeFetcher(res: Response | Error = new Response(null, { status: 201 })) {
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+    if (res instanceof Error) throw res;
+    return res;
+  });
+  return { fetch } as unknown as Fetcher & { fetch: typeof fetch };
+}
+
+function makeEnv(overrides: { prod?: Fetcher | undefined; staging?: Fetcher | undefined } = {}) {
   return {
-    INGEST_ENDPOINT: overrides.prodEndpoint ?? "https://prod.invalid/api/notify/ingest",
-    NOTIFY_WORKER_SECRET: overrides.prodSecret ?? "PROD_SECRET",
-    INGEST_ENDPOINT_STAGING: overrides.stagingEndpoint ?? "https://staging.invalid/api/notify/ingest",
-    NOTIFY_WORKER_SECRET_STAGING: overrides.stagingSecret ?? "STAGING_SECRET",
+    NOTIFY: "prod" in overrides ? overrides.prod : makeFetcher(),
+    NOTIFY_STAGING: "staging" in overrides ? overrides.staging : makeFetcher(),
   };
 }
 
@@ -70,65 +72,37 @@ describe("extractTenantShortId", () => {
 });
 
 describe("pickRoute", () => {
-  it("routes notify.ippoan.org to prod", () => {
+  it("routes notify.ippoan.org to the prod binding", () => {
     const env = makeEnv();
-    const r = pickRoute("notify.ippoan.org", env as any);
-    expect(r?.endpoint).toBe("https://prod.invalid/api/notify/ingest");
-    expect(r?.secret).toBe("PROD_SECRET");
+    expect(pickRoute("notify.ippoan.org", env)).toBe(env.NOTIFY);
   });
 
-  it("routes notify-staging.ippoan.org to staging", () => {
+  it("routes notify-staging.ippoan.org to the staging binding", () => {
     const env = makeEnv();
-    const r = pickRoute("notify-staging.ippoan.org", env as any);
-    expect(r?.endpoint).toBe("https://staging.invalid/api/notify/ingest");
-    expect(r?.secret).toBe("STAGING_SECRET");
+    expect(pickRoute("notify-staging.ippoan.org", env)).toBe(env.NOTIFY_STAGING);
   });
 
   it("returns null for unknown host", () => {
     const env = makeEnv();
-    expect(pickRoute("ippoan.org", env as any)).toBeNull();
-    expect(pickRoute("evil.example.com", env as any)).toBeNull();
+    expect(pickRoute("ippoan.org", env)).toBeNull();
+    expect(pickRoute("evil.example.com", env)).toBeNull();
   });
 
-  it("prod routing requires both endpoint and secret", () => {
-    const env: any = {
-      INGEST_ENDPOINT: "",
-      NOTIFY_WORKER_SECRET: "x",
-    };
-    expect(pickRoute("notify.ippoan.org", env)).toBeNull();
-    const env2: any = {
-      INGEST_ENDPOINT: "https://prod.invalid",
-      NOTIFY_WORKER_SECRET: "",
-    };
-    expect(pickRoute("notify.ippoan.org", env2)).toBeNull();
-  });
-
-  it("staging routing requires both endpoint and secret", () => {
-    const env: any = {
-      INGEST_ENDPOINT: "https://prod.invalid",
-      NOTIFY_WORKER_SECRET: "x",
-      // INGEST_ENDPOINT_STAGING / NOTIFY_WORKER_SECRET_STAGING 未設定
-    };
-    expect(pickRoute("notify-staging.ippoan.org", env)).toBeNull();
+  it("returns null when the binding for the host is missing", () => {
+    expect(pickRoute("notify.ippoan.org", makeEnv({ prod: undefined }))).toBeNull();
+    expect(pickRoute("notify-staging.ippoan.org", makeEnv({ staging: undefined }))).toBeNull();
   });
 
   it("respects PROD_HOST / STAGING_HOST overrides", () => {
-    const env: any = {
-      INGEST_ENDPOINT: "https://prod.invalid",
-      NOTIFY_WORKER_SECRET: "p",
-      INGEST_ENDPOINT_STAGING: "https://stg.invalid",
-      NOTIFY_WORKER_SECRET_STAGING: "s",
-      PROD_HOST: "mail.example.com",
-      STAGING_HOST: "mail-stg.example.com",
-    };
-    expect(pickRoute("mail.example.com", env)?.endpoint).toBe("https://prod.invalid");
-    expect(pickRoute("mail-stg.example.com", env)?.endpoint).toBe("https://stg.invalid");
+    const env = { ...makeEnv(), PROD_HOST: "mail.example.com", STAGING_HOST: "mail-stg.example.com" };
+    expect(pickRoute("mail.example.com", env)).toBe(env.NOTIFY);
+    expect(pickRoute("mail-stg.example.com", env)).toBe(env.NOTIFY_STAGING);
     expect(pickRoute("notify.ippoan.org", env)).toBeNull();
   });
 
   it("is case insensitive", () => {
     const env = makeEnv();
-    expect(pickRoute("Notify.Ippoan.Org", env as any)?.endpoint).toBe("https://prod.invalid/api/notify/ingest");
+    expect(pickRoute("Notify.Ippoan.Org", env)).toBe(env.NOTIFY);
   });
 });
 
@@ -205,57 +179,56 @@ describe("email worker", () => {
     expect(msg.setReject).not.toHaveBeenCalled();
   });
 
-  it("forwards prod email with tenant_short_id + prod secret", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(null, { status: 201 }));
-
+  it("forwards prod email to the NOTIFY binding without a shared secret", async () => {
+    const env = makeEnv();
+    const globalFetch = vi.spyOn(globalThis, "fetch");
     const msg = makeMessage({ to: "tenant-1925a8e1@notify.ippoan.org" });
-    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
+    await worker.email(msg, env as any, {} as ExecutionContext);
 
     expect(msg.setReject).not.toHaveBeenCalled();
-    const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(url).toBe("https://prod.invalid/api/notify/ingest");
-    expect((init as RequestInit).headers).toMatchObject({
-      "X-Worker-Secret": "PROD_SECRET",
-    });
+    expect(globalFetch).not.toHaveBeenCalled();
+    expect(env.NOTIFY_STAGING!.fetch).not.toHaveBeenCalled();
+    const [url, init] = (env.NOTIFY as any).fetch.mock.calls[0]!;
+    expect(url).toBe(INGEST_URL);
+    expect(url).toBe("https://alc-notify/api/notify/ingest");
+    expect((init as RequestInit).method).toBe("POST");
+    expect((init as RequestInit).headers).toEqual({ "Content-Type": "application/json" });
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.tenant_short_id).toBe("1925a8e1");
     expect(body.attachments).toHaveLength(1);
+    expect(body.attachments[0]).toMatchObject({ filename: "a.pdf", content_type: "application/pdf" });
     expect(body.from).toBe("sender@example.com");
   });
 
-  it("forwards staging email with staging secret", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(null, { status: 201 }));
-
+  it("forwards staging email to the NOTIFY_STAGING binding", async () => {
+    const env = makeEnv();
     const msg = makeMessage({ to: "tenant-acme@notify-staging.ippoan.org" });
-    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
+    await worker.email(msg, env as any, {} as ExecutionContext);
 
     expect(msg.setReject).not.toHaveBeenCalled();
-    const [url, init] = fetchSpy.mock.calls[0]!;
-    expect(url).toBe("https://staging.invalid/api/notify/ingest");
-    expect((init as RequestInit).headers).toMatchObject({
-      "X-Worker-Secret": "STAGING_SECRET",
-    });
+    expect(env.NOTIFY!.fetch).not.toHaveBeenCalled();
+    expect((env.NOTIFY_STAGING as any).fetch.mock.calls[0]![0]).toBe(INGEST_URL);
   });
 
-  it("rejects when ingest endpoint returns non-OK", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("upstream error", { status: 500 }),
-    );
+  it("silently drops when the binding is missing", async () => {
     const msg = makeMessage();
-    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
+    await worker.email(msg, makeEnv({ prod: undefined }) as any, {} as ExecutionContext);
+    expect(msg.setReject).not.toHaveBeenCalled();
+  });
+
+  it("rejects when ingest returns non-OK", async () => {
+    const env = makeEnv({ prod: makeFetcher(new Response("upstream error", { status: 500 })) });
+    const msg = makeMessage();
+    await worker.email(msg, env as any, {} as ExecutionContext);
     expect(msg.setReject).toHaveBeenCalledWith(
       expect.stringContaining("Ingest failed: 500"),
     );
   });
 
-  it("rejects when fetch itself throws", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+  it("rejects when the binding fetch throws", async () => {
+    const env = makeEnv({ prod: makeFetcher(new Error("network down")) });
     const msg = makeMessage();
-    await worker.email(msg, makeEnv() as any, {} as ExecutionContext);
+    await worker.email(msg, env as any, {} as ExecutionContext);
     expect(msg.setReject).toHaveBeenCalledWith(
       expect.stringContaining("Ingest fetch failed"),
     );

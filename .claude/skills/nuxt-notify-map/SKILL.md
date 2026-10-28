@@ -25,7 +25,7 @@ trouble 通知予約の発火基盤 (DO Alarm)。
 | **composables** | `useApi.ts`, `useFilePicker.ts`, `useFolderWatcher.ts`, `useRedactionWatch.ts` | API / ファイル選択 / フォルダ監視 / 墨消し WS 購読 |
 | **utils** | `app/utils/{folderWatchDb,preview-fetch}.ts` | フォルダ監視 IndexedDB / プレビュー取得 |
 | **server route** | `server/api/proxy/[...path].ts` | 認証付き REST proxy。`@ippoan/auth-client/server` の `createAuthWorkerProxyHandler` で auth-worker `/alc-proxy/*` に service binding thin-forward (#434 step 3 方式 B)。introspect / ACL / OIDC mint / X-Tenant-ID + X-User-* 注入は auth-worker 側に集約。consumer は X-Alc-Proxy-Secret (=INTERNAL_SHARED_SECRET) + browser JWT のみ。AUTH_WORKER service binding + INTERNAL_SHARED_SECRET 必須 |
-| **Worker: email-receiver** | `workers/email-receiver/src/index.ts` | Cloudflare Email Routing 受信 → host で prod/staging 振り分け → backend ingest に POST (PostalMime で parse) |
+| **Worker: email-receiver** | `workers/email-receiver/src/index.ts` | Cloudflare Email Routing 受信 → host で prod/staging 振り分け → alc-notify-worker の `POST /api/notify/ingest` に Service Binding で POST (PostalMime で parse) |
 | **Worker: realtime-bus** | `workers/realtime-bus/src/{index,redact-bus,jwt}.ts` | 墨消し完了の DO fan-out。`POST /broadcast` (backend push) / `GET /subscribe` (browser WS)。`RedactBus` DO は hibernation 対応 |
 | **Worker: schedule-alarm** | `workers/schedule-alarm/src/{index,alarm-do,logic}.ts` | trouble 通知予約の発火基盤 (Refs ippoan/rust-alc-api#550)。`PUT/DELETE /alarms/{uuid}` (X-Internal-Shared-Secret = 既存 INTERNAL_SHARED_SECRET 再利用、専用 secret なし) → `ScheduleAlarmDO` (1 予約=1 DO=1 alarm)。alarm() は auth-worker service binding `/alc-internal-proxy` 経由で rust-alc-api internal fire を叩く (2xx/404=done、他は backoff retry 上限 5) |
 
@@ -33,14 +33,14 @@ trouble 通知予約の発火基盤 (DO Alarm)。
 
 - nuxt.config: `nitro.preset = cloudflare_module`、`@nuxtjs/tailwindcss`、`@ippoan/auth-client` を vite optimizeDeps exclude、`allowedHosts: ['.trycloudflare.com']`。
 - wrangler.jsonc (frontend): prod (`nuxt-notify`, notify.ippoan.org) / `[env.staging]`。vars: `NUXT_PUBLIC_{API_BASE,AUTH_WORKER_URL,REALTIME_BUS_URL}` (realtime は `wss://realtime.notify(-staging).ippoan.org`)。
-- email-receiver: Email Routing trigger。env `INGEST_ENDPOINT(_STAGING)`, `NOTIFY_WORKER_SECRET(_STAGING)`, `PROD_HOST`/`STAGING_HOST`。`pickRoute(host, env)` で 1 Worker が prod/staging 両方を振り分け。
+- email-receiver: Email Routing trigger。Service Binding `NOTIFY` (alc-notify) / `NOTIFY_STAGING` (alc-notify-staging)、`PROD_HOST`/`STAGING_HOST`。`pickRoute(host, env)` で 1 Worker が prod/staging 両方を振り分け。共有の秘密 (`X-Worker-Secret`・`NOTIFY_WORKER_SECRET`) は無い — 信頼は binding だけ (W8c-2、Refs ippoan/rust-alc-api#680)。
 - realtime-bus: env `REDACT_BUS` (DO namespace), `JWT_SECRET`, `NOTIFY_REDACT_BROADCAST_SECRET`。
 
 ## gotcha
 
 - **3 つの独立 deploy 単位**。frontend (`tag-release.yml`) / email-receiver (`email-worker-deploy.yml`) / realtime-bus (`realtime-bus-deploy.yml`) は別々の wrangler/CI。1 つ直して全部出る訳ではない。
 - **frontend は runtime secret を持たない** が、ci-workflows の secret-verify gate を pass させるため wrangler.jsonc に `"secrets": {"required": []}` を**明示 declare** (Refs ippoan/ci-workflows#50)。空でも消さない。
-- **email-receiver は 1 Worker で prod/staging 両受け**。host (notify.ippoan.org / notify-staging…) で `pickRoute` がエンドポイント+secret を選ぶ。`MAX_TOTAL_BYTES=25MB` / `MAX_ATTACHMENTS=20`。
+- **email-receiver は 1 Worker で prod/staging 両受け**。host (notify.ippoan.org / notify-staging…) で `pickRoute` が binding を選ぶ。`MAX_TOTAL_BYTES=25MB` / `MAX_ATTACHMENTS=20`。
 - **realtime-bus は no-op 許容**。frontend の `realtimeBusUrl` 未設定なら `useRedactionWatch` は no-op (既存 polling が UI 更新を担う)。WS subprotocol は `"bearer,<jwt>"`、broadcast は `X-Broadcast-Secret` で検証。
 - **認証付き JSON API は `/api/proxy/*` 経由** (#434 step 2)。`useApi().apiFetch` /
   preview / download は相対 `/api/proxy/...` を叩き、proxy が introspect で tenant を
