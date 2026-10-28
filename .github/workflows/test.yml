@@ -25,7 +25,9 @@ jobs:
       # per-worker (`traffic::<repo>::nuxt-notify`) で記録させ、Release Wave の
       # Pending releases / flip を unit 単位で機能させる (Refs ippoan/ci-dashboard#427)。
       report_worker_name: nuxt-notify
-      has_integration: true
+      # rust の文書の一覧・search を叩く live のテストは、口が alc-notify-worker へ移り rust から消えるので消した
+      # (W8c-1、Refs ippoan/rust-alc-api#680)。tests/integration/ が空のため integration を止める
+      has_integration: false
       integration_test_command: 'npx vitest run tests/integration/'
       integration_env: 'API_BASE_URL=http://localhost:18080'
       # Release Wave compatibility: integration test green 時に
