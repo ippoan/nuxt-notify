@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 配信受信者向けの公開 viewer ページ。ログイン不要。
-// /api/notify/read/{token} 経由で 302 redirect されてくる。
+// 配信 (alc-notify-worker) が送る /v/{token} の URL を受信者が直接開く。
+// メタと実体は同一オリジン (nuxt-notify Worker = KV+R2) の /api/notify/v/{token} から取る。
 //
 // PDF は vue-pdf-embed (PDF.js) で <canvas> に描画する。
 // LINE / LINE WORKS の内蔵 webview は PDF をネイティブ表示できないので、
@@ -8,18 +9,9 @@
 import VuePdfEmbed from 'vue-pdf-embed'
 
 const route = useRoute()
-const config = useRuntimeConfig()
-const apiBase = config.public.apiBase as string
 
 const token = computed(() => String(route.params.token))
-
-// viewer 配信元 (#434 移行): まず同一オリジン (nuxt-notify Worker = KV+R2) を試し、
-// KV 未登録 (= #455 deploy 前の古い token) なら rust にフォールバックする。
-// '' = 同一オリジン / apiBase = rust。null = 未解決。
-const resolvedBase = ref<string | null>(null)
-const fileUrl = computed(() =>
-  resolvedBase.value === null ? '' : `${resolvedBase.value}/api/notify/v/${token.value}/file`,
-)
+const fileUrl = computed(() => `/api/notify/v/${token.value}/file`)
 
 interface ViewMetadata {
   file_name: string | null
@@ -28,8 +20,7 @@ interface ViewMetadata {
   source_sender: string | null
   source_received_at: string | null
   expire_at: string
-  // Worker (同一オリジン) のメタは content_type を含む (rust fallback は含まない)
-  content_type?: string | null
+  content_type: string | null
 }
 
 const meta = ref<ViewMetadata | null>(null)
@@ -38,9 +29,9 @@ const pdfLoaded = ref(false)
 const pdfPages = ref(0)
 const pdfError = ref('')
 
-// 実体の content-type (HEAD で取得)。原本ファイル名は `.pdf` でも redacted の
+// 実体の content-type (メタの content_type)。原本ファイル名は `.pdf` でも redacted の
 // 実ファイルが `.jpg` (rust-alc-api PR #327 以降) のケースに対応するため、
-// ファイル名ではなくレスポンスヘッダで判断する。
+// ファイル名ではなく実体の型で判断する。
 const fileContentType = ref<string | null>(null)
 
 const isPdf = computed(() => {
@@ -69,36 +60,15 @@ function formatDate(s: string | null): string {
 
 async function load() {
   try {
-    // 同一オリジン (Worker/KV) を優先。404 (KV 未登録) / 503 (binding 未設定) は
-    // rust にフォールバック。410 (失効) / その他はそのまま扱う。
-    let base = ''
-    let res = await fetch(`/api/notify/v/${token.value}`)
-    if (res.status === 404 || res.status === 503) {
-      base = apiBase
-      res = await fetch(`${apiBase}/api/notify/v/${token.value}`)
-    }
+    // 410 (失効) は gone、404 (KV 未登録) は not_found、503 (binding 未設定) ほかは error。
+    const res = await fetch(`/api/notify/v/${token.value}`)
     if (res.status === 410) { status.value = 'gone'; return }
     if (res.status === 404) { status.value = 'not_found'; return }
     if (!res.ok) { status.value = 'error'; return }
     const m = (await res.json()) as ViewMetadata
     meta.value = m
-    resolvedBase.value = base
-    // Worker メタは content_type を含むので HEAD 不要。rust fallback は含まないので
-    // 実体の Content-Type を HEAD で取る (PDF / JPEG 切替判定)。取れなければ null のまま
-    // → 「ファイルを開く」ボタン (default ブランチ) に倒す。
-    const ct = m.content_type
-    if (ct) {
-      fileContentType.value = ct.toLowerCase()
-    } else {
-      try {
-        const head = await fetch(fileUrl.value, { method: 'HEAD' })
-        if (head.ok) {
-          fileContentType.value = head.headers.get('content-type')?.toLowerCase() ?? null
-        }
-      } catch {
-        // ignore — file-name ベース推測はしない (古い情報の方が有害)
-      }
-    }
+    // content_type が無ければ null のまま →「ファイルを開く」ボタン (default ブランチ) に倒す。
+    fileContentType.value = m.content_type?.toLowerCase() ?? null
     status.value = 'ok'
   } catch {
     status.value = 'error'
