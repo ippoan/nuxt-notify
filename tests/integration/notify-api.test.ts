@@ -26,16 +26,11 @@ async function api(path: string, options: { method?: string; body?: unknown } = 
 }
 
 describe.skipIf(skip)('notify API integration', () => {
-  // --- Documents ---
-  it('GET /notify/documents — list', async () => {
-    const { status, data } = await api('/notify/documents')
-    expect(status).toBe(200)
-    expect(Array.isArray(data)).toBe(true)
-  })
-
-  it('GET /notify/documents/search?q=test — search', async () => {
-    const { status, data } = await api('/notify/documents/search?q=test')
-    expect(status).toBe(200)
-    expect(Array.isArray(data)).toBe(true)
+  // 文書の閲覧の口 (一覧・search など) は alc-notify-worker へ移り rust から消えた (W8c-1、Refs ippoan/rust-alc-api#680)。
+  // Release Wave の compat の記録を続けるため、W8c-2 まで rust に残る口を副作用なしで 1 本叩く: 無い文書の DELETE は
+  // 行が無いので DB も R2 も触らず 404 (rust の email_documents.rs の delete_document)。W8c-2 でこの口を移すときに置き換える。
+  it('DELETE /notify/documents/{無い id} — 404', async () => {
+    const { status } = await api(`/notify/documents/${crypto.randomUUID()}`, { method: 'DELETE' })
+    expect(status).toBe(404)
   })
 })
