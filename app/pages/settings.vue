@@ -372,12 +372,12 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Webhook URL -->
+      <!-- Webhook URL: auth-worker の公開の受け口 (POST /line/webhook)。auth-worker が alc-notify-worker へ渡して署名を照合する -->
       <div class="bg-gray-50 border rounded-lg p-4">
         <h3 class="font-medium mb-2">Step 3: Webhook URL</h3>
         <p class="text-sm text-gray-500 mb-2">LINE Developers Console の Webhook URL に以下を設定:</p>
         <code class="block bg-white border rounded px-3 py-2 text-sm font-mono text-blue-700 select-all">
-          {{ apiBase }}/api/notify/line/webhook
+          {{ authWorkerUrl }}/line/webhook
         </code>
         <p class="text-xs text-gray-400 mt-1">Webhookの利用を「ON」にしてください</p>
       </div>
