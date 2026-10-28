@@ -38,15 +38,4 @@ describe.skipIf(skip)('notify API integration', () => {
     expect(status).toBe(200)
     expect(Array.isArray(data)).toBe(true)
   })
-
-  // --- Read Tracker ---
-  it('GET /notify/read/{random-token} — unknown token returns 404', async () => {
-    // 新仕様: 未知 token は 404 (旧仕様の「frontend_url にリダイレクト」を廃止し、
-    // 期限内のみ R2 presigned URL に 302 / 期限切れは 410 / 不明は 404 に統一)
-    const resp = await fetch(
-      `${API_BASE}/api/notify/read/00000000-0000-0000-0000-000000000000`,
-      { redirect: 'manual' },
-    )
-    expect(resp.status).toBe(404)
-  })
 })

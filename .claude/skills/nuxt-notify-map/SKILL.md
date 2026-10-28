@@ -45,8 +45,10 @@ trouble 通知予約の発火基盤 (DO Alarm)。
 - **認証付き JSON API は `/api/proxy/*` 経由** (#434 step 2)。`useApi().apiFetch` /
   preview / download は相対 `/api/proxy/...` を叩き、proxy が introspect で tenant を
   注入する。client は Bearer token だけ載せ X-Tenant-ID は手動付与しない。
-- **公開 viewer `v/[token]` は proxy を通さない**。認証不要で `apiBase` を直叩きする
-  (`/api/notify/v/{token}` / `/file`)。proxy に通すと introspect 401 になるので壊さない。
+- **公開 viewer `v/[token]` は proxy を通さない**。認証不要で同一オリジンの
+  `server/api/notify/v/` (KV `NOTIFY_VIEW_KV` + R2) だけを叩く (`/api/notify/v/{token}` / `/file`)。
+  rust への fallback は無い (rust の閲覧の口は W8a で消す。Refs ippoan/rust-alc-api#680)。
+  proxy に通すと introspect 401 になるので壊さない。
 - **multipart upload (`useApi().uploadFetch`) は proxy 非経由** で `apiBase` 直叩きのまま。
   `createIdentityProxyHandler` は body を JSON.stringify するため multipart を壊す
   (carins は base64 JSON で送る別契約)。multipart の proxy 化は要追加検討。
