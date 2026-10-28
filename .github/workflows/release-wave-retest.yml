@@ -27,9 +27,7 @@ jobs:
   retest:
     uses: ippoan/ci-workflows/.github/workflows/frontend-ci.yml@main
     with:
-      # rust の文書の一覧・search を叩く live のテストは、口が alc-notify-worker へ移り rust から消えるので消した
-      # (W8c-1、Refs ippoan/rust-alc-api#680)。tests/integration/ が空のため integration を止める
-      has_integration: false
+      has_integration: true
       has_deploy: false
       # dispatch payload の backend image を test 相手に明示指定する。
       # frontend-ci の report-compatibility がこの image をそのまま記録する。
