@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { createApp, defineComponent, h, nextTick } from 'vue'
 import DocumentCard from '../../app/components/DocumentCard.vue'
 
-// Nuxt の NuxtLink の代わり (to を href に持つ <a>)。本物は Nuxt が build 時に resolveComponent を import に置き換える
+// Nuxt の NuxtLink の代わり (to を href に持つ <a>)。本物は Nuxt が compile 時に <NuxtLink> のタグを解決する
 const NuxtLinkStub = defineComponent({
   props: { to: { type: String, required: true } },
   setup(props, { slots }) {
