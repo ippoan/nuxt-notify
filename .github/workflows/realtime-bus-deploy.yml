@@ -34,9 +34,9 @@ jobs:
       typecheck_command: 'npx tsc --noEmit'
       # @ippoan/mcp-cf-workers (GitHub Packages) の install に必要
       npm_scope: '@ippoan'
-      # vitest はまだ追加してない (Phase 2.5 の最小スコープ)。
-      # E2E は wscat + curl で staging 確認 → 後追いで unit (Phase 2.6)。
-      test_command: 'echo "no tests yet"'
+      # unit は tests/ (/broadcast の照合の判定 src/auth.ts。Refs ippoan/rust-alc-api#680)。
+      # E2E は下の smoke (curl で staging の /broadcast)。
+      test_command: 'npx vitest run'
       deploy_staging_script: 'npx wrangler deploy --env staging --config wrangler.toml'
       deploy_release_script: 'npx wrangler deploy --config wrangler.toml'
       has_integration: false

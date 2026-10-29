@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { getHiddenIds, hideDocument, unhideDocument } from '~/utils/hiddenDocuments'
+import { bulkMaskConfirmMessage, maskActionLabel } from '~/utils/documentBadges'
 import type { LogisticsFields } from '~/utils/documentBadges'
+import {
+  POLL_INTERVAL_MS,
+  inProgressIds,
+  keepPolling,
+  processingIds,
+} from '~/utils/processingPoll'
 
 const { apiFetch } = useApi()
 const { onUpdate: onRedactUpdate } = useRedactionWatch()
@@ -71,11 +78,15 @@ async function deleteOne(doc: NotifyDocument) {
   }
 }
 
+const LIST_PATH = '/notify/documents?limit=20'
+
 async function reload() {
   loading.value = true
   error.value = ''
   try {
-    documents.value = await apiFetch<NotifyDocument[]>('/notify/documents?limit=20')
+    documents.value = await apiFetch<NotifyDocument[]>(LIST_PATH)
+    // マスクの背景処理が動いている文書は、開いた時点から終わりまで追う
+    watchDocuments(processingIds(documents.value))
   } catch (e: any) {
     error.value = e.message || String(e)
   } finally {
@@ -83,8 +94,52 @@ async function reload() {
   }
 }
 
-// 一括 redact の対象: PDF かつ redaction_status が「未処理」相当
-//  - undefined: API が PR #314 未デプロイ (production 互換)
+// ── やり直しの後の polling ────────────────────────────────────────────────
+// 終わりは WS (onRedactUpdate) でも届くが、WS が来なくても行が切り替わるよう、
+// マスクを始めた文書と処理中の文書が終わる (completed / failed / skipped) まで一覧を静かに取り直す。
+const watchedIds = ref<Set<string>>(new Set())
+let listPollTimer: ReturnType<typeof setTimeout> | null = null
+let listPollStartedAt = 0
+let listPollFailures = 0
+
+function watchDocuments(ids: Iterable<string>) {
+  const next = new Set([...watchedIds.value, ...ids])
+  if (next.size === watchedIds.value.size) return
+  watchedIds.value = next
+  listPollFailures = 0
+  listPollStartedAt = Date.now()
+  scheduleListPoll()
+}
+
+function scheduleListPoll() {
+  if (listPollTimer || watchedIds.value.size === 0) return
+  listPollTimer = setTimeout(async () => {
+    listPollTimer = null
+    try {
+      // silent reload (loading フラグは触らない、一覧のちらつき防止)
+      documents.value = await apiFetch<NotifyDocument[]>(LIST_PATH)
+      listPollFailures = 0
+    } catch {
+      listPollFailures += 1
+    }
+    watchedIds.value = inProgressIds(documents.value, watchedIds.value)
+    if (watchedIds.value.size > 0 && keepPolling(listPollFailures, listPollStartedAt, Date.now())) {
+      scheduleListPoll()
+    } else {
+      watchedIds.value = new Set()
+    }
+  }, POLL_INTERVAL_MS)
+}
+
+onUnmounted(() => {
+  if (listPollTimer) {
+    clearTimeout(listPollTimer)
+    listPollTimer = null
+  }
+})
+
+// 一括マスクの対象: PDF かつ redaction_status が「未処理」相当
+//  - undefined: 状態の列が無い古い行
 //  - 'pending': migration 109 default (バックフィルなし)
 //  - 'failed':  Gemini 失敗の retry
 // processing 中は触らない (重複呼び出し防止)、completed は使い回し。
@@ -96,29 +151,16 @@ const pendingPdfDocs = computed(() =>
   }),
 )
 
-// API が 404 を返したら「本番未デプロイ」とみなしてフラグを立てる。
-// 一度立ったら再度ボタンを叩かないよう全 redact UI を抑制する。
-const apiNotDeployed = ref(false)
-
-function isNotDeployedError(e: any): boolean {
-  const msg = String(e?.message ?? e)
-  // ofetch / $fetch は HTTP エラーを `[POST] "..." 404` で返す
-  return msg.includes('404') || e?.statusCode === 404 || e?.status === 404
-}
-
 async function recomputeOne(doc: NotifyDocument) {
   if (recomputingIds.value.has(doc.id)) return
   recomputingIds.value = new Set([...recomputingIds.value, doc.id])
   try {
     await apiFetch(`/notify/documents/${doc.id}/redact-recompute`, { method: 'POST' })
-    // 即座に状態を processing に倒して UI 反映 (バック側は async)
+    // 即座に状態を processing に倒して UI 反映 (バック側は queue)。終わりまで polling で追う
     doc.redaction_status = 'processing'
+    watchDocuments([doc.id])
   } catch (e: any) {
-    if (isNotDeployedError(e)) {
-      apiNotDeployed.value = true
-    } else {
-      alert(`redact 失敗 (${doc.file_name}): ${e.message ?? e}`)
-    }
+    alert(`マスクの開始に失敗 (${doc.file_name}): ${e.message ?? e}`)
   } finally {
     const next = new Set(recomputingIds.value)
     next.delete(doc.id)
@@ -129,33 +171,27 @@ async function recomputeOne(doc: NotifyDocument) {
 async function bulkRecompute() {
   const targets = pendingPdfDocs.value
   if (targets.length === 0) return
-  if (!confirm(`未処理 / 失敗の PDF ${targets.length} 件を一括で redact します。よろしいですか?`)) return
+  if (!confirm(bulkMaskConfirmMessage(targets.length))) return
   bulkRunning.value = true
   bulkProgress.value = { done: 0, total: targets.length }
   try {
-    // バックは tokio::spawn で並列処理するので、同時に POST しても
-    // 直列にする必要はない。ただ rate limit や DB 負荷を抑えるため逐次実行する。
+    // バックは queue に積むだけなので同時に POST しても困らないが、
+    // rate limit や DB 負荷を抑えるため逐次実行する。
     for (const doc of targets) {
       try {
         await apiFetch(`/notify/documents/${doc.id}/redact-recompute`, { method: 'POST' })
         doc.redaction_status = 'processing'
       } catch (e: any) {
-        if (isNotDeployedError(e)) {
-          apiNotDeployed.value = true
-          break // 全件 404 になるはずなのでループ中断
-        }
         // 個別失敗は止めずに続行 (後で reload で状態を確認)
-        console.error('redact failed', doc.id, e)
+        console.error('mask failed', doc.id, e)
       }
       bulkProgress.value = { done: bulkProgress.value.done + 1, total: targets.length }
     }
   } finally {
     bulkRunning.value = false
-    if (!apiNotDeployed.value) {
-      // ステータス確認のため直後に最新化 (processing → completed の自動遷移を見るために
-      // ユーザーが個別ページで polling する前提)
-      await reload()
-    }
+    // ステータス確認のため直後に最新化し、送った文書を終わりまで polling で追う
+    await reload()
+    watchDocuments(targets.map((d) => d.id))
     // progress 表示は 3 秒後に消す
     setTimeout(() => { bulkProgress.value = null }, 3000)
   }
@@ -167,7 +203,7 @@ onMounted(() => {
 })
 
 // notify-realtime-bus からの terminal status push を受信したら一覧の該当行を patch。
-// 一覧は polling していないので、これが無いと UI が古いまま (要手動 reload)。
+// (WS が来なくても、やり直しの後は上の polling が終わりまで追う)
 onRedactUpdate((ev) => {
   const doc = documents.value.find((d) => d.id === ev.document_id)
   if (!doc) return
@@ -188,11 +224,11 @@ onRedactUpdate((ev) => {
           <input v-model="showHidden" type="checkbox" class="rounded">
           非表示も表示 ({{ hiddenCount }})
         </label>
-        <button v-if="pendingPdfDocs.length > 0 && !apiNotDeployed"
+        <button v-if="pendingPdfDocs.length > 0"
                 @click="bulkRecompute"
                 :disabled="bulkRunning"
                 class="px-3 py-1.5 text-sm bg-amber-100 text-amber-800 hover:bg-amber-200 rounded disabled:opacity-50">
-          🔒 未処理 PDF を一括 redact ({{ pendingPdfDocs.length }})
+          🔒 未処理 PDF を一括マスク ({{ pendingPdfDocs.length }})
         </button>
         <FolderWatcher @uploaded="reload" />
         <UploadButton @uploaded="reload" />
@@ -203,22 +239,11 @@ onRedactUpdate((ev) => {
     <div v-if="bulkProgress"
          class="mb-3 bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
       <div v-if="bulkRunning">
-        🔄 redact 開始中… {{ bulkProgress.done }} / {{ bulkProgress.total }}
+        🔄 マスク開始中… {{ bulkProgress.done }} / {{ bulkProgress.total }}
       </div>
       <div v-else>
-        ✅ {{ bulkProgress.total }} 件の redact 開始を送信しました。完了状況は各行を確認してください。
+        ✅ {{ bulkProgress.total }} 件のマスク開始を送信しました。完了状況は各行を確認してください。
       </div>
-    </div>
-
-    <!-- 本番 API 未デプロイ通知 (PR #314 タグリリース前) -->
-    <div v-if="apiNotDeployed"
-         class="mb-3 bg-yellow-50 border border-yellow-300 rounded p-3 text-sm text-yellow-900">
-      <div class="font-medium mb-1">⚠️ redact API がまだ本番デプロイされていません</div>
-      <p class="text-xs">
-        rust-alc-api を <code>/tag-release patch</code> でリリースして
-        <code>NOTIFY_REDACT_2STAGE=1</code> を設定すると利用可能になります。
-        現状では PDF の金額マスクは無効です。
-      </p>
     </div>
 
     <!-- FolderWatcher の pending list はここに Teleport される -->
@@ -238,16 +263,14 @@ onRedactUpdate((ev) => {
                     :to="`/documents/${doc.id}`"
                     :dimmed="hiddenIds.has(doc.id)">
         <template #actions>
-          <!-- 未処理 PDF は個別 redact 開始ボタンを表示。
+          <!-- 未処理 PDF は個別にマスク開始ボタンを表示。
                (undefined / pending / failed の PDF が対象) -->
           <button v-if="['pending', 'failed', undefined].includes(doc.redaction_status as any)
                         && (doc.file_name ?? '').toLowerCase().endsWith('.pdf')"
                   @click="recomputeOne(doc)"
                   :disabled="recomputingIds.has(doc.id)"
                   class="text-xs bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 px-3 py-1 rounded disabled:opacity-50">
-            {{ recomputingIds.has(doc.id) ? '実行中…'
-               : doc.redaction_status === 'failed' ? '🔄 redact を再試行'
-               : '🔄 redact 開始' }}
+            {{ recomputingIds.has(doc.id) ? '実行中…' : maskActionLabel(doc.redaction_status) }}
           </button>
 
           <div class="ml-auto flex items-center gap-2">

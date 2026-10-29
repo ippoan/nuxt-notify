@@ -117,6 +117,51 @@ export function formatDate(s: string | null): string {
   })
 }
 
+// ── マスク (金額の黒塗り) のボタンの文言 ─────────────────────────────────
+//
+// 画面の言葉は「マスク」に揃える (バッジの「🔒 マスク済」「⚠️ マスク失敗」と同じ)。
+// やり直しの口は POST /notify/documents/{id}/redact-recompute (alc-notify-worker、202)。
+
+/** マスクを始める / やり直すボタンの文言 (redaction_status ごと)。 */
+export function maskActionLabel(redactionStatus: string | undefined | null): string {
+  switch (redactionStatus) {
+    case 'completed':
+      return '🔄 再マスク'
+    case 'failed':
+      return '🔄 マスクを再試行'
+    default:
+      return '🔄 マスク開始'
+  }
+}
+
+/** 一括マスクの確認の文。 */
+export function bulkMaskConfirmMessage(count: number): string {
+  return `未処理 / 失敗の PDF ${count} 件を一括でマスクします。よろしいですか?`
+}
+
+// ── 再抽出 (運送情報) ────────────────────────────────────────────────────
+//
+// やり直しの口は POST /notify/documents/{id}/extract-recompute (alc-notify-worker、202)。
+// 抽出が終わった文書 (completed: 運送情報あり・なしとも / failed) と、固まった文書で出す。
+// 処理中 (pending / processing) は二重に積まないよう出さない (固まったときは stuck の導線が出す)。
+// PDF 以外は抽出するものが無い (worker が logistics 無しで完了にする) ので出さない。
+
+/** 「🔄 再抽出」ボタンを出すか。 */
+export function canRecomputeExtraction(
+  fileName: string | null | undefined,
+  extractionStatus: string | undefined | null,
+): boolean {
+  if (!(fileName ?? '').toLowerCase().endsWith('.pdf')) return false
+  return extractionStatus === 'completed' || extractionStatus === 'failed'
+}
+
+/** 再抽出の確認の文 (運送情報があるときは上書きになることを伝える)。 */
+export function recomputeExtractionConfirmMessage(hasLogistics: boolean): string {
+  return hasLogistics
+    ? '運送情報を抽出し直します。今の運送情報は上書きされます。よろしいですか?'
+    : '運送情報を抽出し直します。よろしいですか?'
+}
+
 // ── 抽出 stuck 判定 (Refs #66) ──────────────────────────────────────────
 //
 // backend の extract は fire-and-forget の tokio::spawn で、Cloud Run の CPU
