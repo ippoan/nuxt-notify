@@ -26,11 +26,12 @@ async function api(path: string, options: { method?: string; body?: unknown } = 
 }
 
 describe.skipIf(skip)('notify API integration', () => {
-  // 文書の閲覧の口 (一覧・search など) は alc-notify-worker へ移り rust から消えた (W8c-1、Refs ippoan/rust-alc-api#680)。
-  // Release Wave の compat の記録を続けるため、W8c-2 まで rust に残る口を副作用なしで 1 本叩く: 無い文書の DELETE は
-  // 行が無いので DB も R2 も触らず 404 (rust の email_documents.rs の delete_document)。W8c-2 でこの口を移すときに置き換える。
-  it('DELETE /notify/documents/{無い id} — 404', async () => {
-    const { status } = await api(`/notify/documents/${crypto.randomUUID()}`, { method: 'DELETE' })
-    expect(status).toBe(404)
+  // notify の口は全部 alc-notify-worker へ移り、rust から消えた (W8c-1・W8c-2、Refs ippoan/rust-alc-api#680)。
+  // Release Wave の compat の記録を W9 まで続けるため、rust に残る副作用の無い口を 1 本叩く (alc-misc の health)。
+  // W9 で rust を止めるときに integration ごと外す。
+  it('GET /health — 200', async () => {
+    const { status, data } = await api('/health')
+    expect(status).toBe(200)
+    expect(data.status).toBe('ok')
   })
 })
