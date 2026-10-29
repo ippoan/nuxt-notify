@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, resolveComponent } from 'vue'
 import {
   extractionBadge,
   distributionBadge,
@@ -46,6 +47,10 @@ const redaction = computed<BadgeView | null>(() => redactionBadge(props.doc))
 const dateLabel = computed(() =>
   new Date(props.doc.created_at).toLocaleString('ja-JP'),
 )
+
+// カード本体のリンク。resolveComponent は setup で呼ぶ (template の式の中で呼ぶと解決されず、
+// `<nuxtlink to=...>` という生の要素が描かれてリンクにならなかった)。
+const NuxtLink = resolveComponent('NuxtLink')
 </script>
 
 <template>
@@ -56,7 +61,7 @@ const dateLabel = computed(() =>
     ]"
   >
     <component
-      :is="to ? resolveComponent('NuxtLink') : 'div'"
+      :is="to ? NuxtLink : 'div'"
       :to="to ?? undefined"
       class="block p-4"
     >
