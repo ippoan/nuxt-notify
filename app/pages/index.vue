@@ -2,6 +2,12 @@
 import { getHiddenIds, hideDocument, unhideDocument } from '~/utils/hiddenDocuments'
 import { bulkMaskConfirmMessage, maskActionLabel } from '~/utils/documentBadges'
 import type { LogisticsFields } from '~/utils/documentBadges'
+import {
+  POLL_INTERVAL_MS,
+  inProgressIds,
+  keepPolling,
+  processingIds,
+} from '~/utils/processingPoll'
 
 const { apiFetch } = useApi()
 const { onUpdate: onRedactUpdate } = useRedactionWatch()
@@ -72,17 +78,65 @@ async function deleteOne(doc: NotifyDocument) {
   }
 }
 
+const LIST_PATH = '/notify/documents?limit=20'
+
 async function reload() {
   loading.value = true
   error.value = ''
   try {
-    documents.value = await apiFetch<NotifyDocument[]>('/notify/documents?limit=20')
+    documents.value = await apiFetch<NotifyDocument[]>(LIST_PATH)
+    // マスクの背景処理が動いている文書は、開いた時点から終わりまで追う
+    watchDocuments(processingIds(documents.value))
   } catch (e: any) {
     error.value = e.message || String(e)
   } finally {
     loading.value = false
   }
 }
+
+// ── やり直しの後の polling ────────────────────────────────────────────────
+// 終わりは WS (onRedactUpdate) でも届くが、WS が来なくても行が切り替わるよう、
+// マスクを始めた文書と処理中の文書が終わる (completed / failed / skipped) まで一覧を静かに取り直す。
+const watchedIds = ref<Set<string>>(new Set())
+let listPollTimer: ReturnType<typeof setTimeout> | null = null
+let listPollStartedAt = 0
+let listPollFailures = 0
+
+function watchDocuments(ids: Iterable<string>) {
+  const next = new Set([...watchedIds.value, ...ids])
+  if (next.size === watchedIds.value.size) return
+  watchedIds.value = next
+  listPollFailures = 0
+  listPollStartedAt = Date.now()
+  scheduleListPoll()
+}
+
+function scheduleListPoll() {
+  if (listPollTimer || watchedIds.value.size === 0) return
+  listPollTimer = setTimeout(async () => {
+    listPollTimer = null
+    try {
+      // silent reload (loading フラグは触らない、一覧のちらつき防止)
+      documents.value = await apiFetch<NotifyDocument[]>(LIST_PATH)
+      listPollFailures = 0
+    } catch {
+      listPollFailures += 1
+    }
+    watchedIds.value = inProgressIds(documents.value, watchedIds.value)
+    if (watchedIds.value.size > 0 && keepPolling(listPollFailures, listPollStartedAt, Date.now())) {
+      scheduleListPoll()
+    } else {
+      watchedIds.value = new Set()
+    }
+  }, POLL_INTERVAL_MS)
+}
+
+onUnmounted(() => {
+  if (listPollTimer) {
+    clearTimeout(listPollTimer)
+    listPollTimer = null
+  }
+})
 
 // 一括マスクの対象: PDF かつ redaction_status が「未処理」相当
 //  - undefined: 状態の列が無い古い行
@@ -102,8 +156,9 @@ async function recomputeOne(doc: NotifyDocument) {
   recomputingIds.value = new Set([...recomputingIds.value, doc.id])
   try {
     await apiFetch(`/notify/documents/${doc.id}/redact-recompute`, { method: 'POST' })
-    // 即座に状態を processing に倒して UI 反映 (バック側は async)
+    // 即座に状態を processing に倒して UI 反映 (バック側は queue)。終わりまで polling で追う
     doc.redaction_status = 'processing'
+    watchDocuments([doc.id])
   } catch (e: any) {
     alert(`マスクの開始に失敗 (${doc.file_name}): ${e.message ?? e}`)
   } finally {
@@ -134,9 +189,9 @@ async function bulkRecompute() {
     }
   } finally {
     bulkRunning.value = false
-    // ステータス確認のため直後に最新化 (processing → completed の自動遷移を見るために
-    // ユーザーが個別ページで polling する前提)
+    // ステータス確認のため直後に最新化し、送った文書を終わりまで polling で追う
     await reload()
+    watchDocuments(targets.map((d) => d.id))
     // progress 表示は 3 秒後に消す
     setTimeout(() => { bulkProgress.value = null }, 3000)
   }
@@ -148,7 +203,7 @@ onMounted(() => {
 })
 
 // notify-realtime-bus からの terminal status push を受信したら一覧の該当行を patch。
-// 一覧は polling していないので、これが無いと UI が古いまま (要手動 reload)。
+// (WS が来なくても、やり直しの後は上の polling が終わりまで追う)
 onRedactUpdate((ev) => {
   const doc = documents.value.find((d) => d.id === ev.document_id)
   if (!doc) return

@@ -8,6 +8,12 @@ import {
   maskActionLabel,
   recomputeExtractionConfirmMessage,
 } from '~/utils/documentBadges'
+import {
+  POLL_INTERVAL_MS,
+  POLL_MAX_FAILURES,
+  becameCompleted,
+  shouldPollDocument,
+} from '~/utils/processingPoll'
 
 const route = useRoute()
 const { apiFetch } = useApi()
@@ -107,6 +113,8 @@ const recomputing = ref(false)
 // 物流情報の再抽出フラグ (マスクとは別)
 const recomputingExtract = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+// polling の取得が続けて失敗した回数 (POLL_MAX_FAILURES で止める。1 回の失敗では止めない)
+let pollFailures = 0
 
 // 進行中の preview fetch を中断するための controller。
 // 古い response が遅れて到着し新 Blob URL を上書きするのを防ぐ。
@@ -266,30 +274,29 @@ function schedulePollIfProcessing() {
     clearTimeout(pollTimer)
     pollTimer = null
   }
-  // redact 処理中 / extract 処理中 のいずれかなら polling 続行。
+  // マスク処理中 / 抽出処理中 のいずれかなら polling 続行 (WS が来なくても終わりまで追う)。
   // どちらか先に完走しても、もう片方を見るために残り時間 polling する。
-  const redS = document.value?.redaction_status
-  const extS = document.value?.extraction_status
-  const redactPending = redS === 'processing' || redS === 'pending'
-  const extractPending = extS === 'processing' || extS === 'pending'
-  if (redactPending || extractPending) {
-    pollTimer = setTimeout(() => {
-      // silent reload (loading フラグは触らない、UI ちらつき防止)
-      apiFetch<DocumentResponse>(`/notify/documents/${documentId.value}`)
-        .then((res) => {
-          document.value = res.document
-          deliveries.value = res.deliveries
-          schedulePollIfProcessing()
-          // 状態が変わってプレビュー対象が変わるなら再ロード
-          if (document.value?.redaction_status === 'completed' && isPdf.value) {
-            loadPreview()
-          }
-        })
-        .catch(() => {
-          // 失敗してもポーリングは諦める (ユーザーが手動 reload を期待)
-        })
-    }, 5000)
-  }
+  if (!shouldPollDocument(document.value?.redaction_status, document.value?.extraction_status)) return
+  pollTimer = setTimeout(() => {
+    const prevRedaction = document.value?.redaction_status
+    // silent reload (loading フラグは触らない、UI ちらつき防止)
+    apiFetch<DocumentResponse>(`/notify/documents/${documentId.value}`)
+      .then((res) => {
+        pollFailures = 0
+        document.value = res.document
+        deliveries.value = res.deliveries
+        schedulePollIfProcessing()
+        // マスクが completed に変わった瞬間だけプレビューを読み直す (抽出の polling 中に毎回読み直さない)
+        if (becameCompleted(prevRedaction, document.value?.redaction_status) && isPdf.value) {
+          loadPreview()
+        }
+      })
+      .catch(() => {
+        // 一時的な失敗では止めない。続けて POLL_MAX_FAILURES 回失敗したら諦める (手動の再読込に任せる)
+        pollFailures += 1
+        if (pollFailures < POLL_MAX_FAILURES) schedulePollIfProcessing()
+      })
+  }, POLL_INTERVAL_MS)
 }
 
 async function loadPreview() {
@@ -367,6 +374,7 @@ async function recomputeRedaction() {
     await apiFetch(`/notify/documents/${document.value.id}/redact-recompute`, { method: 'POST' })
     // 状態を即座に処理中に倒して polling 開始 (バック側は async で processing→completed)
     if (document.value) document.value.redaction_status = 'processing'
+    pollFailures = 0
     previewPdfSource.value = null
     releaseBlobUrl()
     schedulePollIfProcessing()
@@ -402,6 +410,7 @@ async function recomputeExtract() {
       document.value.updated_at = new Date().toISOString()
     }
     nowTick.value = Date.now()
+    pollFailures = 0
     schedulePollIfProcessing()
   } catch (e: any) {
     alert(`運送情報の抽出やり直しに失敗: ${e.message ?? e}`)

@@ -10,6 +10,7 @@
 import { RedactBus } from "./redact-bus";
 import { verifyJwt } from "./jwt";
 import { resolveSecret, type SecretBinding } from "./secret";
+import { checkBroadcastAuth } from "./auth";
 
 export { RedactBus };
 
@@ -27,13 +28,6 @@ interface BroadcastPayload {
   status: string;
   redactions_applied?: number;
   redaction_error?: string;
-}
-
-function constantTimeEqualStr(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }
 
 /**
@@ -57,7 +51,10 @@ export default {
     if (url.pathname === "/broadcast" && req.method === "POST") {
       const provided = req.headers.get("X-Broadcast-Secret") ?? "";
       const expected = await resolveSecret(env.NOTIFY_REDACT_BROADCAST_SECRET);
-      if (!expected || !constantTimeEqualStr(provided, expected)) {
+      const auth = checkBroadcastAuth(provided, expected);
+      if (auth !== "ok") {
+        // 理由は固定の語だけ (secret_unset / mismatch)。値・長さは出さない
+        console.warn(`broadcast_auth: ${auth}`);
         return new Response("invalid signature", { status: 401 });
       }
 
