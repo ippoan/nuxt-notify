@@ -10,6 +10,10 @@ import {
   buildLogisticsTitle,
   isExtractionStuck,
   type DocumentCardData,
+  bulkMaskConfirmMessage,
+  canRecomputeExtraction,
+  maskActionLabel,
+  recomputeExtractionConfirmMessage,
 } from '../../app/utils/documentBadges'
 
 /** buildLogisticsTitle に渡す最小の DocumentCardData を作る。 */
@@ -228,5 +232,48 @@ describe('buildLogisticsTitle', () => {
         extracted_data: { summary: 'no logistics' },
       }),
     ).toBeNull()
+  })
+})
+
+describe('maskActionLabel', () => {
+  it('画面の言葉は「マスク」(redact と書かない)', () => {
+    expect(maskActionLabel('completed')).toBe('🔄 再マスク')
+    expect(maskActionLabel('failed')).toBe('🔄 マスクを再試行')
+    expect(maskActionLabel('pending')).toBe('🔄 マスク開始')
+    expect(maskActionLabel(undefined)).toBe('🔄 マスク開始')
+    expect(maskActionLabel(null)).toBe('🔄 マスク開始')
+    for (const s of ['completed', 'failed', 'pending', undefined]) {
+      expect(maskActionLabel(s)).not.toMatch(/redact/i)
+    }
+  })
+
+  it('一括マスクの確認の文', () => {
+    expect(bulkMaskConfirmMessage(3)).toBe('未処理 / 失敗の PDF 3 件を一括でマスクします。よろしいですか?')
+    expect(bulkMaskConfirmMessage(3)).not.toMatch(/redact/i)
+  })
+})
+
+describe('canRecomputeExtraction', () => {
+  it('抽出が終わった PDF (completed: 運送情報あり・なしとも / failed) で出す', () => {
+    expect(canRecomputeExtraction('配車.pdf', 'completed')).toBe(true)
+    expect(canRecomputeExtraction('配車.PDF', 'completed')).toBe(true)
+    expect(canRecomputeExtraction('配車.pdf', 'failed')).toBe(true)
+  })
+
+  it('処理中は出さない (二重に積まない。固まったときは stuck の導線)', () => {
+    expect(canRecomputeExtraction('配車.pdf', 'pending')).toBe(false)
+    expect(canRecomputeExtraction('配車.pdf', 'processing')).toBe(false)
+    expect(canRecomputeExtraction('配車.pdf', undefined)).toBe(false)
+  })
+
+  it('PDF 以外は抽出するものが無いので出さない', () => {
+    expect(canRecomputeExtraction('写真.png', 'completed')).toBe(false)
+    expect(canRecomputeExtraction(null, 'completed')).toBe(false)
+    expect(canRecomputeExtraction(undefined, 'failed')).toBe(false)
+  })
+
+  it('確認の文: 運送情報があるときは上書きを伝える', () => {
+    expect(recomputeExtractionConfirmMessage(true)).toContain('上書き')
+    expect(recomputeExtractionConfirmMessage(false)).not.toContain('上書き')
   })
 })

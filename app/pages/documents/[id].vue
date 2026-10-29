@@ -2,7 +2,12 @@
 import { useAuth } from '@ippoan/auth-client'
 import VuePdfEmbed from 'vue-pdf-embed'
 import { fetchPdfBytes } from '~/utils/preview-fetch'
-import { isExtractionStuck } from '~/utils/documentBadges'
+import {
+  canRecomputeExtraction,
+  isExtractionStuck,
+  maskActionLabel,
+  recomputeExtractionConfirmMessage,
+} from '~/utils/documentBadges'
 
 const route = useRoute()
 const { apiFetch } = useApi()
@@ -97,9 +102,9 @@ const previewLoading = ref(false)
 const previewError = ref('')
 const pdfPages = ref(0)
 
-// 再 redact 実行中フラグ + ポーリング制御
+// 再マスク実行中フラグ + ポーリング制御
 const recomputing = ref(false)
-// 物流情報の再抽出フラグ (redact とは別)
+// 物流情報の再抽出フラグ (マスクとは別)
 const recomputingExtract = ref(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -213,10 +218,10 @@ const distributeDisabledReason = computed(() => {
     case 'processing':
       return 'マスク処理中。完了をお待ちください'
     case 'failed':
-      return 'マスク失敗。「再 redact」をお試しください'
+      return `マスク失敗。「${maskActionLabel('failed')}」をお試しください`
     default:
       // undefined (旧 API) のとき、PDF だけブロック
-      return isPdf.value ? '「🔄 redact 開始」でマスク処理を開始してください' : ''
+      return isPdf.value ? `「${maskActionLabel(undefined)}」でマスク処理を開始してください` : ''
   }
 })
 
@@ -356,7 +361,7 @@ function onPdfError(e: unknown) {
 
 async function recomputeRedaction() {
   if (!document.value || recomputing.value) return
-  if (!confirm('redact を再計算します。プレビューが更新されます。よろしいですか?')) return
+  if (!confirm('マスクをやり直します。プレビューが更新されます。よろしいですか?')) return
   recomputing.value = true
   try {
     await apiFetch(`/notify/documents/${document.value.id}/redact-recompute`, { method: 'POST' })
@@ -366,7 +371,7 @@ async function recomputeRedaction() {
     releaseBlobUrl()
     schedulePollIfProcessing()
   } catch (e: any) {
-    alert(`再 redact 失敗: ${e.message ?? e}`)
+    alert(`マスクのやり直しに失敗: ${e.message ?? e}`)
   } finally {
     recomputing.value = false
   }
@@ -377,8 +382,15 @@ async function recomputeRedaction() {
  * バック (`POST /notify/documents/{id}/extract-recompute`) は async で 202 Accepted を返し、
  * ジョブ完走時に extraction_status を completed/failed に書き換える。UI は polling で追う。
  */
+// 抽出が終わった文書 (運送情報あり・なし / 失敗) に「🔄 再抽出」を出すか
+const showRecomputeExtract = computed(() =>
+  canRecomputeExtraction(document.value?.file_name, document.value?.extraction_status),
+)
+
 async function recomputeExtract() {
   if (!document.value || recomputingExtract.value) return
+  // 固まった文書 (処理中のまま) は確認なしでやり直す (stuck の導線)
+  if (!isExtractStuck.value && !confirm(recomputeExtractionConfirmMessage(hasLogistics.value))) return
   recomputingExtract.value = true
   try {
     await apiFetch(`/notify/documents/${document.value.id}/extract-recompute`, { method: 'POST' })
@@ -595,7 +607,7 @@ onUnmounted(() => {
           ℹ️ {{ distributeDisabledReason }}
         </div>
 
-        <!-- redact 失敗時のエラー詳細 + 再 redact ボタン -->
+        <!-- マスク失敗時のエラー詳細 (やり直しはプレビューの「🔄 マスクを再試行」) -->
         <div v-if="document.redaction_status === 'failed'"
              class="mt-3 text-xs bg-red-50 border border-red-200 text-red-800 px-3 py-2 rounded">
           <div class="font-medium mb-1">マスク処理に失敗しました</div>
@@ -619,10 +631,11 @@ onUnmounted(() => {
         <div v-if="hasLogistics" class="mt-3 pt-3 border-t">
           <div class="flex items-center justify-between mb-2">
             <h4 class="text-sm font-semibold text-blue-800">📦 運送情報</h4>
-            <button @click="recomputeExtract"
+            <button v-if="showRecomputeExtract"
+                    @click="recomputeExtract"
                     :disabled="recomputingExtract"
-                    class="text-xs text-blue-600 hover:underline disabled:opacity-50">
-              {{ recomputingExtract ? '抽出中…' : '抽出やり直し' }}
+                    class="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1 rounded disabled:opacity-50">
+              {{ recomputingExtract ? '再抽出中…' : '🔄 再抽出' }}
             </button>
           </div>
           <p class="text-xs text-gray-500 mb-2">
@@ -730,10 +743,11 @@ onUnmounted(() => {
         <div v-else-if="isPdf && document.extraction_status === 'completed'" class="mt-3 pt-3 border-t">
           <div class="flex items-center justify-between">
             <span class="text-xs text-gray-400">運送情報なし (配車手配票ではないか抽出未対応)</span>
-            <button @click="recomputeExtract"
+            <button v-if="showRecomputeExtract"
+                    @click="recomputeExtract"
                     :disabled="recomputingExtract"
-                    class="text-xs text-blue-600 hover:underline disabled:opacity-50">
-              {{ recomputingExtract ? '抽出中…' : '抽出やり直し' }}
+                    class="text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1 rounded disabled:opacity-50">
+              {{ recomputingExtract ? '再抽出中…' : '🔄 再抽出' }}
             </button>
           </div>
         </div>
@@ -743,10 +757,11 @@ onUnmounted(() => {
              class="mt-3 pt-3 border-t text-xs bg-red-50 border-red-200 text-red-800 px-3 py-2 rounded">
           <div class="flex items-center justify-between">
             <span class="font-medium">運送情報の抽出に失敗しました</span>
-            <button @click="recomputeExtract"
+            <button v-if="showRecomputeExtract"
+                    @click="recomputeExtract"
                     :disabled="recomputingExtract"
-                    class="text-xs underline hover:no-underline">
-              {{ recomputingExtract ? '抽出中…' : '再試行' }}
+                    class="text-xs bg-red-100 hover:bg-red-200 border border-red-300 px-3 py-1 rounded disabled:opacity-50">
+              {{ recomputingExtract ? '再抽出中…' : '🔄 再抽出' }}
             </button>
           </div>
           <div v-if="document.extraction_error" class="mt-1 font-mono break-all">
@@ -760,7 +775,7 @@ onUnmounted(() => {
         <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
           <h3 class="text-sm font-bold">プレビュー</h3>
           <div class="flex items-center gap-2">
-            <!-- redacted/原本 切替 (redacted がある時のみ) -->
+            <!-- マスク済/原本 切替 (マスク済がある時のみ) -->
             <div v-if="document.redacted_r2_key" class="inline-flex rounded border overflow-hidden text-xs">
               <button @click="switchPreview('redacted')"
                       :class="previewMode === 'redacted'
@@ -781,7 +796,7 @@ onUnmounted(() => {
                     @click="recomputeRedaction"
                     :disabled="recomputing"
                     class="text-xs bg-amber-100 text-amber-800 hover:bg-amber-200 px-3 py-1 rounded disabled:opacity-50">
-              {{ recomputing ? '実行中…' : '🔄 再 redact' }}
+              {{ recomputing ? '実行中…' : maskActionLabel(document.redaction_status) }}
             </button>
             <span v-if="pdfPages > 0" class="text-xs text-gray-400">
               {{ pdfPages }} ページ
@@ -814,12 +829,12 @@ onUnmounted(() => {
           <p class="text-xs text-gray-500">
             このドキュメントはまだマスク処理されていません。
             <br>
-            「🔄 redact 開始」ボタンで処理を開始できます。
+            「{{ maskActionLabel(document.redaction_status) }}」ボタンで処理を開始できます。
           </p>
           <button @click="recomputeRedaction"
                   :disabled="recomputing"
                   class="mt-3 text-sm bg-amber-100 text-amber-800 hover:bg-amber-200 px-4 py-2 rounded disabled:opacity-50">
-            {{ recomputing ? '実行中…' : '🔄 redact 開始' }}
+            {{ recomputing ? '実行中…' : maskActionLabel(document.redaction_status) }}
           </button>
         </div>
         <div v-else-if="previewImageUrl"

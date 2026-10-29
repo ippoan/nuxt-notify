@@ -7,7 +7,7 @@
  *
  * 重要: 返す `Uint8Array` の backing `ArrayBuffer` は **元の response から切り離した
  * 独立コピー** (`buf.slice(0)`)。pdfjs-dist worker は内部で `postMessage(transfer)`
- * を行い、渡した buffer を detach する。tab 切替 / WS イベント / 再 redact 完了
+ * を行い、渡した buffer を detach する。tab 切替 / WS イベント / 再マスク完了
  * polling が並行して `loadPreview()` を呼ぶと、PDF.js Worker がまだ前 buffer を
  * 処理している間に新しい代入が走り、`Failed to execute 'postMessage' on 'Worker':
  * ArrayBuffer at index 0 is already detached` が発生する。clone することで
