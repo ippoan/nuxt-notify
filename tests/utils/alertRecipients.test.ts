@@ -15,6 +15,8 @@ import {
   resendVerification,
   sendAlertTest,
   sendBpReportTest,
+  sendVeinReportTest,
+  VEIN_REPORT_GROUP_NAME,
   alertTestMessage,
   alertCheckDisabledReason,
   type ApiFetch,
@@ -355,5 +357,30 @@ describe('sendBpReportTest', () => {
       throw { status: 409 }
     }) as unknown as ApiFetch
     expect(await sendBpReportTest(api)).toEqual({ ok: false, message: '血圧の日報の受け取り手がいません' })
+  })
+})
+
+describe('sendVeinReportTest', () => {
+  it('グループ名は送る側と同じ', () => {
+    expect(VEIN_REPORT_GROUP_NAME).toBe('指静脈の日報')
+  })
+  it('daily-report-test を呼び、結果を返す', async () => {
+    const { api, calls } = fakeFetch({ 'POST /vein/daily-report-test': { sent: 3, failed: 1 } })
+    expect(await sendVeinReportTest(api)).toEqual({ ok: true, sent: 3, failed: 1 })
+    expect(calls[0]).toMatchObject({ path: '/vein/daily-report-test', method: 'POST' })
+  })
+  it('受け取り手がいない (409) は指静脈の日報の文言', async () => {
+    const api = (async () => {
+      throw { status: 409 }
+    }) as unknown as ApiFetch
+    expect(await sendVeinReportTest(api)).toEqual({ ok: false, message: '指静脈の日報の受け取り手がいません' })
+  })
+  it('グループ名で受け取り手を読み書きできる', async () => {
+    const { api, calls } = fakeFetch({
+      'GET /notify/groups': [{ id: 'g3', name: VEIN_REPORT_GROUP_NAME }],
+      'POST /notify/groups/g3/members': {},
+    })
+    await addAlertMember(api, 'r1', VEIN_REPORT_GROUP_NAME)
+    expect(calls.at(-1)?.path).toBe('/notify/groups/g3/members')
   })
 })

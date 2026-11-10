@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   BP_REPORT_GROUP_NAME,
+  VEIN_REPORT_GROUP_NAME,
   createAlertMemberStore,
   alertCheckDisabledReason,
   canResend,
@@ -11,6 +12,7 @@ import {
   resendVerification,
   sendAlertTest,
   sendBpReportTest,
+  sendVeinReportTest,
   alertTestMessage,
   type EmailStatus,
   type ApiFetch,
@@ -73,15 +75,33 @@ const alertStore = createAlertMemberStore(
   (members) => (alertMembers.value = members),
   (message) => (alertError.value = message),
 )
-// 血圧の日報メール (毎朝 7:00) の受け取り手。仕組みはアルコール検知と同じで、グループ名だけが違う
-const bpMembers = ref<Set<string>>(new Set())
-const bpError = ref('')
-const bpStore = createAlertMemberStore(
-  alertFetch,
-  (members) => (bpMembers.value = members),
-  (message) => (bpError.value = message),
-  { groupName: BP_REPORT_GROUP_NAME, label: '血圧の日報' },
-)
+// 日報メール (毎朝 7:00) の受け取り手。仕組みはアルコール検知と同じで、グループ名と送信口だけが違う
+const reports = [
+  {
+    key: 'bp',
+    label: '血圧の日報',
+    groupName: BP_REPORT_GROUP_NAME,
+    send: sendBpReportTest,
+    note: '',
+  },
+  {
+    key: 'vein',
+    label: '指静脈の日報',
+    groupName: VEIN_REPORT_GROUP_NAME,
+    send: sendVeinReportTest,
+    note: '毎朝 7:00、前日の登録の見比べと照合の食い違いを送ります。警告が無い日も送ります。',
+  },
+].map((def) => {
+  const members = ref<Set<string>>(new Set())
+  const error = ref('')
+  const store = createAlertMemberStore(
+    alertFetch,
+    (m) => (members.value = m),
+    (message) => (error.value = message),
+    { groupName: def.groupName, label: def.label },
+  )
+  return { ...def, members, error, store, testing: ref(false), testResult: ref<{ ok: boolean; message: string } | null>(null) }
+})
 const loadAlertState = () => alertStore.load()
 
 async function load() {
@@ -95,8 +115,8 @@ async function load() {
     loading.value = false
   }
   alertError.value = ''
-  bpError.value = ''
-  await Promise.all([loadAlertState(), bpStore.load(), loadStatuses()])
+  reports.forEach((rep) => (rep.error.value = ''))
+  await Promise.all([loadAlertState(), ...reports.map((rep) => rep.store.load()), loadStatuses()])
 }
 
 async function toggleAlert(r: Recipient, checked: boolean) {
@@ -104,9 +124,9 @@ async function toggleAlert(r: Recipient, checked: boolean) {
   await alertStore.toggle(r.id, checked)
 }
 
-async function toggleBp(r: Recipient, checked: boolean) {
-  bpError.value = ''
-  await bpStore.toggle(r.id, checked)
+async function toggleReport(rep: (typeof reports)[number], r: Recipient, checked: boolean) {
+  rep.error.value = ''
+  await rep.store.toggle(r.id, checked)
 }
 
 async function resend(r: Recipient) {
@@ -130,19 +150,16 @@ async function sendTest() {
   }
 }
 
-// 血圧の日報メールのテスト送信 (チェック済みの人全員へ)
-const bpTesting = ref(false)
-const bpTestResult = ref<{ ok: boolean; message: string } | null>(null)
-
-async function sendBpTest() {
-  if (!confirm(`血圧の日報メールのテストを ${bpMembers.value.size} 人に送ります。よろしいですか？`)) return
-  bpTesting.value = true
-  bpTestResult.value = null
+// 日報メールのテスト送信 (チェック済みの人全員へ)
+async function sendReportTest(rep: (typeof reports)[number]) {
+  if (!confirm(`${rep.label}メールのテストを ${rep.members.value.size} 人に送ります。よろしいですか？`)) return
+  rep.testing.value = true
+  rep.testResult.value = null
   try {
-    const res = await sendBpReportTest(alertFetch)
-    bpTestResult.value = { ok: res.ok, message: alertTestMessage(res) }
+    const res = await rep.send(alertFetch)
+    rep.testResult.value = { ok: res.ok, message: alertTestMessage(res) }
   } finally {
-    bpTesting.value = false
+    rep.testing.value = false
   }
 }
 
@@ -274,7 +291,9 @@ onMounted(load)
     </div>
 
     <div v-if="alertError" class="text-red-500 text-sm mb-2">{{ alertError }}</div>
-    <div v-if="bpError" class="text-red-500 text-sm mb-2">{{ bpError }}</div>
+    <div v-for="rep in reports" :key="rep.key">
+      <div v-if="rep.error.value" class="text-red-500 text-sm mb-2">{{ rep.error.value }}</div>
+    </div>
 
     <div class="flex items-center gap-3 mb-2">
       <button @click="sendTest" :disabled="alertMembers.size === 0 || alertTesting"
@@ -287,15 +306,18 @@ onMounted(load)
       </span>
     </div>
 
-    <div class="flex items-center gap-3 mb-2">
-      <button @click="sendBpTest" :disabled="bpMembers.size === 0 || bpTesting"
-              class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
-        {{ bpTesting ? '送信中...' : '血圧の日報のテスト送信' }}
-      </button>
-      <span v-if="bpTestResult" class="text-sm"
-            :class="bpTestResult.ok ? 'text-green-600' : 'text-red-500'">
-        {{ bpTestResult.message }}
-      </span>
+    <div v-for="rep in reports" :key="rep.key" class="mb-2">
+      <div class="flex items-center gap-3">
+        <button @click="sendReportTest(rep)" :disabled="rep.members.value.size === 0 || rep.testing.value"
+                class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+          {{ rep.testing.value ? '送信中...' : `${rep.label}のテスト送信` }}
+        </button>
+        <span v-if="rep.testResult.value" class="text-sm"
+              :class="rep.testResult.value.ok ? 'text-green-600' : 'text-red-500'">
+          {{ rep.testResult.value.message }}
+        </span>
+      </div>
+      <p v-if="rep.note" class="text-xs text-gray-500 mt-1">{{ rep.note }}</p>
     </div>
 
     <!-- 一覧 -->
@@ -312,7 +334,7 @@ onMounted(load)
           <th class="px-4 py-2 text-left">電話番号</th>
           <th class="px-4 py-2 text-left">メール</th>
           <th class="px-4 py-2 text-center">アルコール検知メール</th>
-          <th class="px-4 py-2 text-center">血圧の日報</th>
+          <th v-for="rep in reports" :key="rep.key" class="px-4 py-2 text-center">{{ rep.label }}</th>
           <th class="px-4 py-2 text-center">有効</th>
           <th class="px-4 py-2 text-center">操作</th>
         </tr>
@@ -363,10 +385,10 @@ onMounted(load)
                    :title="alertCheckDisabledReason(r.email)"
                    @change="toggleAlert(r, ($event.target as HTMLInputElement).checked)" />
           </td>
-          <td class="px-4 py-2 text-center">
-            <input type="checkbox" :checked="bpMembers.has(r.id)" :disabled="!r.email"
+          <td v-for="rep in reports" :key="rep.key" class="px-4 py-2 text-center">
+            <input type="checkbox" :checked="rep.members.value.has(r.id)" :disabled="!r.email"
                    :title="alertCheckDisabledReason(r.email)"
-                   @change="toggleBp(r, ($event.target as HTMLInputElement).checked)" />
+                   @change="toggleReport(rep, r, ($event.target as HTMLInputElement).checked)" />
           </td>
           <td class="px-4 py-2 text-center">
             <button @click="toggle(r)" :class="r.enabled ? 'bg-green-500' : 'bg-gray-300'"
