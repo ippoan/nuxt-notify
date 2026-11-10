@@ -9,6 +9,9 @@ export const ALERT_GROUP_NAME = 'アルコール検知'
 // ippoan/alc-measurements-worker の血圧の日報 (毎朝 7:00 のメール) の宛先グループ名。送る側と一字でも違うと誰にも届かない。
 export const BP_REPORT_GROUP_NAME = '血圧の日報'
 
+// ippoan/alc-vein-worker の指静脈の日報 (毎朝 7:00 のメール) の宛先グループ名 (`report::REPORT_GROUP`)。一字違うと誰にも届かない。
+export const VEIN_REPORT_GROUP_NAME = '指静脈の日報'
+
 export type ApiFetch = <T>(path: string, options?: { method?: string; body?: string }) => Promise<T>
 
 export interface NotifyGroup {
@@ -185,6 +188,11 @@ export async function sendAlertTest(
 /** 血圧の日報メールのテストを受け取り手全員に送る。投げない。 */
 export function sendBpReportTest(apiFetch: ApiFetch): Promise<AlertTestResult> {
   return sendAlertTest(apiFetch, '/measurements/bp-report-test', '血圧の日報')
+}
+
+/** 指静脈の日報メールのテストを受け取り手全員に送る。投げない。 */
+export function sendVeinReportTest(apiFetch: ApiFetch): Promise<AlertTestResult> {
+  return sendAlertTest(apiFetch, '/vein/daily-report-test', '指静脈の日報')
 }
 
 /** テスト送信の結果を 1 行の文言にする。 */
